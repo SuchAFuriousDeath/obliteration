@@ -57,7 +57,8 @@ impl Ucred {
             | Privilege::PROC_SETLOGIN
             | Privilege::SCE680
             | Privilege::SCE683
-            | Privilege::SCE686 => self.is_system(),
+            | Privilege::SCE686
+            | Privilege::SCE687 => self.is_system(),
             v => todo!("priv_check_cred(cred, {v})"),
         };
 

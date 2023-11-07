@@ -15,6 +15,7 @@ use crate::signal::{
 };
 use crate::syscalls::{SysErr, SysIn, SysOut, Syscalls};
 use crate::ucred::{AuthInfo, Privilege, Ucred};
+use gmtx::GroupMutexReadGuard;
 use gmtx::{GroupMutex, GroupMutexWriteGuard, MutexGroup};
 use llt::{SpawnError, Thread};
 use std::any::Any;
@@ -48,6 +49,8 @@ pub struct VProc {
     sigacts: GroupMutex<SignalActs>,                 // p_sigacts
     files: VProcFiles,                               // p_fd
     limits: [ResourceLimit; ResourceLimit::NLIMITS], // p_limit
+    randomized_path_len: GroupMutex<usize>,                      // p_rlen
+    randomized_path: GroupMutex<[u8; 256]>,                      // p_randomized_path
     objects: GroupMutex<IdTable<Arc<dyn Any + Send + Sync>>>,
     app_info: AppInfo,
     ptc: u64,
@@ -69,6 +72,8 @@ impl VProc {
             files: VProcFiles::new(&mg),
             objects: mg.new_member(IdTable::new(0x1000)),
             limits,
+            randomized_path_len: mg.new_member(0),
+            randomized_path: mg.new_member([0u8; 256]),
             app_info: AppInfo::new(),
             ptc: 0,
             uptc: AtomicPtr::new(null_mut()),
@@ -85,6 +90,7 @@ impl VProc {
         sys.register(557, &vp, Self::sys_namedobj_create);
         sys.register(585, &vp, Self::sys_is_in_sandbox);
         sys.register(587, &vp, Self::sys_get_authinfo);
+        sys.register(602, &vp, Self::sys_randomized_path);
 
         Ok(vp)
     }
@@ -103,6 +109,22 @@ impl VProc {
 
     pub fn limit(&self, ty: usize) -> Option<&ResourceLimit> {
         self.limits.get(ty)
+    }
+
+    pub fn randomized_path_len(&self) -> GroupMutexReadGuard<'_, usize> {
+        self.randomized_path_len.read()
+    }
+
+    pub fn randomized_path_len_mut(&self) -> GroupMutexWriteGuard<'_, usize> {
+        self.randomized_path_len.write()
+    }
+
+    pub fn randomized_path(&self) -> GroupMutexReadGuard<'_, [u8; 256]> {
+        self.randomized_path.read()
+    }
+
+    pub fn randomized_path_mut(&self) -> GroupMutexWriteGuard<'_, [u8; 256]> {
+        self.randomized_path.write()
     }
 
     pub fn objects_mut(&self) -> GroupMutexWriteGuard<'_, IdTable<Arc<dyn Any + Send + Sync>>> {
@@ -486,6 +508,56 @@ impl VProc {
             todo!("get_authinfo with buf = null");
         } else {
             unsafe { *buf = info };
+        }
+
+        Ok(SysOut::ZERO)
+    }
+
+    fn sys_randomized_path(self: &Arc<Self>, i: &SysIn) -> Result<SysOut, SysErr> {
+        let name = i.args[0];
+        let addr: *mut u8 = i.args[1].into();
+        let p_len: *mut usize = i.args[2].into();
+
+        let mut copied_len: usize = 0;
+        let mut buf = [0u8; 256];
+
+        let arg_len = if name.is_zero() {
+            if addr.is_null() || p_len.is_null() {
+                0
+            } else {
+                unsafe { *p_len }
+            }
+        } else {
+            todo!("randomized_path with name != null")
+        };
+
+        let current_len: usize = *self.randomized_path_len();
+
+        if current_len > 0 {
+            buf = *self.randomized_path();
+        }
+
+        if copied_len > 0 {
+            *self.randomized_path_len_mut() = copied_len;
+            *self.randomized_path_mut() = buf;
+        }
+
+        if arg_len > 0 && *self.randomized_path_len() > 0 {
+            if *self.randomized_path_len() > arg_len {
+                let slice = unsafe { std::slice::from_raw_parts_mut(addr, arg_len - 1) };
+
+                slice.copy_from_slice(&buf[..arg_len]);
+
+                unsafe { *addr.add(arg_len - 1) = 0 };
+            } else {
+                let slice = unsafe { std::slice::from_raw_parts_mut(addr, *self.randomized_path_len()) };
+
+                slice.copy_from_slice(&buf[..*self.randomized_path_len()]);
+            }
+        }
+
+        if !p_len.is_null() {
+            unsafe { *p_len = *self.randomized_path_len() };
         }
 
         Ok(SysOut::ZERO)

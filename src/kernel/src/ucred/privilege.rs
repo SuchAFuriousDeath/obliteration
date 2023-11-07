@@ -15,6 +15,7 @@ impl Privilege {
     pub const SCE680: Self = Self(680);
     pub const SCE683: Self = Self(683);
     pub const SCE686: Self = Self(686);
+    pub const SCE687: Self = Self(687);
 }
 
 impl Display for Privilege {
@@ -26,6 +27,7 @@ impl Display for Privilege {
             Self::SCE680 => f.write_str("SCE680"),
             Self::SCE683 => f.write_str("SCE683"),
             Self::SCE686 => f.write_str("SCE686"),
+            Self::SCE687 => f.write_str("SCE687"),
             v => v.0.fmt(f),
         }
     }

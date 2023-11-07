@@ -64,6 +64,10 @@ impl SysArg {
     pub fn get(self) -> usize {
         self.0
     }
+
+    pub fn is_zero(&self) -> bool {
+        self.0 == 0
+    }
 }
 
 impl<T> From<SysArg> for *const T {
