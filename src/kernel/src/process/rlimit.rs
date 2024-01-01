@@ -11,7 +11,7 @@ impl ResourceLimit {
     pub const CPU: usize = 0;
     pub const FSIZE: usize = 1;
     pub const DATA: usize = 2;
-    pub const NLIMITS: usize = 3;
+    pub const NLIMITS: usize = 3; // TODO this is 13 on the PS4
 
     pub(super) fn new(ty: usize) -> Result<Self, Error> {
         // TODO: Make sure the value is not exceed the value on the PS4.
@@ -20,8 +20,8 @@ impl ResourceLimit {
         match ty {
             Self::DATA => {
                 let mb = 1024 * 1024;
-                let gb = mb * 1024;
-                let max = gb * 5;
+                let gb = 1024 * mb;
+                let max = 5 * gb;
 
                 if l.max > max {
                     l.max = max;
