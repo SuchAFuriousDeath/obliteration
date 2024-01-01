@@ -144,34 +144,9 @@ fn run<E: crate::ee::ExecutionEngine>(
 
     let kernel = Kernel::new(args, param, auth, ee).unwrap();
 
-    kernel.run(path).unwrap();
+    kernel.run().unwrap();
 
     ExitCode::SUCCESS
-}
-
-#[cfg(unix)]
-fn join_thread(thr: Thread) -> Result<(), std::io::Error> {
-    let err = unsafe { libc::pthread_join(thr, std::ptr::null_mut()) };
-
-    if err != 0 {
-        Err(std::io::Error::from_raw_os_error(err))
-    } else {
-        Ok(())
-    }
-}
-
-#[cfg(windows)]
-fn join_thread(thr: Thread) -> Result<(), std::io::Error> {
-    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
-    use windows_sys::Win32::System::Threading::{WaitForSingleObject, INFINITE};
-
-    if unsafe { WaitForSingleObject(thr, INFINITE) } != WAIT_OBJECT_0 {
-        return Err(std::io::Error::last_os_error());
-    }
-
-    assert_ne!(unsafe { CloseHandle(thr) }, 0);
-
-    Ok(())
 }
 
 #[derive(Parser, Deserialize)]

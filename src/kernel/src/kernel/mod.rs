@@ -141,7 +141,7 @@ impl<E: ExecutionEngine> Kernel<E> {
         Ok(Arc::new(kernel))
     }
 
-    pub fn run(&self, path: PathBuf) -> Result<(), RunError<E>> {
+    pub fn run(&self) -> Result<(), RunError<E>> {
         // Print application module.
         let app = self.ld.app();
         let mut log = info!();
