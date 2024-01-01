@@ -182,12 +182,7 @@ impl<E: ExecutionEngine> Kernel<E> {
 
         // Get entry point.
         let boot = self.ld.kern_module().unwrap();
-        let mut arg = Box::pin(EntryArg::<E>::new(
-            &self.arnd,
-            &self.proc,
-            &self.mm,
-            app.clone(),
-        ));
+        let mut arg = Box::pin(EntryArg::new(&self.arnd, &self.proc, &self.mm, app.clone()));
         let entry = unsafe { boot.get_function(boot.entry().unwrap()) };
         let entry = move || unsafe { entry.exec1(arg.as_mut().as_vec().as_ptr()) };
 
