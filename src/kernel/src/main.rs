@@ -3,6 +3,7 @@ use crate::llvm::Llvm;
 use crate::log::{print, LOGGER};
 use crate::ucred::AuthInfo;
 use clap::{Parser, ValueEnum};
+use kernel::RunError;
 use llt::Thread;
 use param::Param;
 use serde::Deserialize;
@@ -110,43 +111,40 @@ fn main() -> ExitCode {
     // Select execution engine.
     match args.execution_engine.unwrap_or_default() {
         #[cfg(target_arch = "x86_64")]
-        ExecutionEngine::Native => run(path, args, param, crate::ee::native::NativeEngine::new()),
+        ExecutionEngine::Native => run(args, param, crate::ee::native::NativeEngine::new()),
         #[cfg(not(target_arch = "x86_64"))]
         ExecutionEngine::Native => {
             error!("Native execution engine cannot be used on your machine.");
             return ExitCode::FAILURE;
         }
-        ExecutionEngine::Llvm => run(
-            path,
-            args,
-            param,
-            crate::ee::llvm::LlvmEngine::new(&Llvm::new()),
-        ),
+        ExecutionEngine::Llvm => run(args, param, crate::ee::llvm::LlvmEngine::new(&Llvm::new())),
     }
 }
 
-fn run<E: crate::ee::ExecutionEngine>(
-    path: PathBuf,
+fn run<E: crate::ee::ExecutionEngine>(args: Args, param: Arc<Param>, ee: Arc<E>) -> ExitCode {
+    match run_inner(args, param, ee) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(e) => {
+            error!("Run failed: {e:?}");
+
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run_inner<E: crate::ee::ExecutionEngine>(
     args: Args,
     param: Arc<Param>,
     ee: Arc<E>,
-) -> ExitCode {
+) -> Result<(), RunError<E>> {
     // Get auth info for the process.
-    let auth = match AuthInfo::from_title_id(param.title_id()) {
-        Some(v) => v,
-        None => {
-            error!("{} has invalid title identifier.", path.display());
-            return ExitCode::FAILURE;
-        }
-    };
+    let auth = AuthInfo::from_title_id(param.title_id()).ok_or(RunError::TitleIdInvalid)?;
 
     print_hwinfo(&args, &param);
 
-    let kernel = Kernel::new(args, param, auth, ee).unwrap();
+    let kernel = Kernel::new(args, param, auth, ee)?;
 
-    kernel.run().unwrap();
-
-    ExitCode::SUCCESS
+    kernel.run()
 }
 
 #[derive(Parser, Deserialize)]

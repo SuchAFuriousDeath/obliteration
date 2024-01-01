@@ -231,6 +231,12 @@ pub enum KernelError<E: ExecutionEngine> {
 
 #[derive(Error, Debug)]
 pub enum RunError<E: ExecutionEngine> {
+    #[error("title id is invalid")]
+    TitleIdInvalid,
+
+    #[error("failed to construct kernel: {0}")]
+    KernelError(#[from] KernelError<E>),
+
     #[error("failed to spawn main thread: {0}")]
     SpawnError(#[from] SpawnError),
 
