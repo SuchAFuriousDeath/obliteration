@@ -1,6 +1,6 @@
 /// An implementation of `self_auth_info`.
 #[repr(C)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AuthInfo {
     pub paid: AuthPaid,
     pub caps: AuthCaps,
@@ -74,7 +74,7 @@ impl AuthPaid {
 
 /// A wrapper type for `caps` field of [`AuthInfo`].
 #[repr(transparent)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AuthCaps([u64; 4]);
 
 impl AuthCaps {
@@ -108,7 +108,7 @@ impl AuthCaps {
 
 /// A wrapper type for `caps` field of [`AuthAttrs`].
 #[repr(transparent)]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct AuthAttrs([u64; 4]);
 
 impl AuthAttrs {
