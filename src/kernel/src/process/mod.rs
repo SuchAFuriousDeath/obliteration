@@ -103,7 +103,7 @@ impl VProc {
             gg,
         });
 
-        sys.register(20, &vp, |p, _| Ok(p.id().into()));
+        sys.register(20, &vp, Self::sys_getpid);
         sys.register(50, &vp, Self::sys_setlogin);
         sys.register(147, &vp, Self::sys_setsid);
         sys.register(340, &vp, Self::sys_sigprocmask);
@@ -181,6 +181,10 @@ impl VProc {
             R::new(R::FSIZE).map_err(E::GetFileSizeLimitFailed)?,
             R::new(R::DATA).map_err(E::GetDataLimitFailed)?,
         ])
+    }
+
+    fn sys_getpid(self: &Arc<Self>, _: &SysIn) -> Result<SysOut, SysErr> {
+        Ok(self.id.into())
     }
 
     fn sys_setlogin(self: &Arc<Self>, i: &SysIn) -> Result<SysOut, SysErr> {
