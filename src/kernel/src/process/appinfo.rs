@@ -1,5 +1,6 @@
 /// An implementation of `appinfo` structure on the PS4.
 #[derive(Debug)]
+#[allow(unused)]
 pub struct AppInfo {
     unk1: u32, // 0x02 = ET_SCE_REPLAY_EXEC
     title_id: String,

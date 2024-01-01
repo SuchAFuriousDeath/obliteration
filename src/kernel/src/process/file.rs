@@ -6,12 +6,14 @@ use std::sync::Arc;
 
 /// An implementation of `filedesc` structure.
 #[derive(Debug)]
+#[allow(unused)]
 pub struct FileDesc {
     files: Gutex<Vec<Option<Arc<VFile>>>>, // fd_ofiles
     cwd: Gutex<Arc<Vnode>>,                // fd_cdir
     root: Gutex<Arc<Vnode>>,               // fd_rdir
 }
 
+#[allow(unused)]
 impl FileDesc {
     pub(super) fn new(root: Arc<Vnode>) -> Self {
         let gg = GutexGroup::new();

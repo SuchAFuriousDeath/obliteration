@@ -143,6 +143,7 @@ bitflags! {
 
 /// An implementation of `statfs` structure.
 #[derive(Debug)]
+#[allow(unused)]
 pub struct FsStats {
     ty: u32,      // f_type
     id: [u32; 2], // f_fsid

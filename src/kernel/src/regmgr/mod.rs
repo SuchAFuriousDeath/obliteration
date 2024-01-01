@@ -403,6 +403,7 @@ impl Display for RegError {
     }
 }
 
+#[allow(unused)]
 struct RegUnk6 {
     key: RegKey,
     unk1: u32,

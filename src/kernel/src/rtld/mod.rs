@@ -165,11 +165,11 @@ impl<E: ExecutionEngine> RuntimeLinker<E> {
         &self.app
     }
 
-    pub fn kernel(&self) -> Option<Arc<Module<E>>> {
+    pub fn kern_module(&self) -> Option<Arc<Module<E>>> {
         self.kernel.read().clone()
     }
 
-    pub fn set_kernel(&self, md: Arc<Module<E>>) {
+    pub fn set_kern_module(&self, md: Arc<Module<E>>) {
         *self.kernel.write() = Some(md);
     }
 

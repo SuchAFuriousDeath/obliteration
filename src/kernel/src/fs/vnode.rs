@@ -10,6 +10,7 @@ use thiserror::Error;
 
 /// An implementation of `vnode`.
 #[derive(Debug)]
+#[allow(unused)]
 pub struct Vnode {
     fs: Arc<Mount>,                                  // v_mount
     ty: VnodeType,                                   // v_type

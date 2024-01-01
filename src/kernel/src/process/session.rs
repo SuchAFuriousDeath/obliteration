@@ -2,6 +2,7 @@ use std::num::NonZeroI32;
 
 /// An implementation of `session` structure.
 #[derive(Debug)]
+#[allow(unused)]
 pub struct VSession {
     id: NonZeroI32, // s_sid
     login: String,  // s_login

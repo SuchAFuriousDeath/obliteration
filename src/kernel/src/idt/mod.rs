@@ -4,6 +4,7 @@ mod entry;
 
 /// An implementation of `sys/kern/orbis_idt.c`.
 #[derive(Debug)]
+#[allow(unused)]
 pub struct Idt<T> {
     sets: Vec<[Option<Entry<T>>; 0x80]>,
     next: usize,

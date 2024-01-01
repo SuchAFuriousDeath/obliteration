@@ -641,6 +641,7 @@ struct RtPrio {
 
 /// TODO: Move this to somewhere else.
 #[derive(Debug)]
+#[allow(unused)]
 pub struct NamedObj {
     name: String,
     data: usize,

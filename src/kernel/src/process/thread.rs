@@ -26,12 +26,12 @@ pub struct VThread {
 }
 
 impl VThread {
-    pub fn new(proc: Arc<VProc>, cred: &Arc<Ucred>) -> Self {
+    pub fn new(proc: &Arc<VProc>, cred: &Arc<Ucred>) -> Self {
         // TODO: Check how the PS4 actually allocate the thread ID.
         let gg = GutexGroup::new();
 
         Self {
-            proc,
+            proc: proc.clone(),
             id: NonZeroI32::new(NEXT_ID.fetch_add(1, Ordering::Relaxed)).unwrap(),
             cred: cred.clone(),
             sigmask: gg.spawn(SignalSet::default()),

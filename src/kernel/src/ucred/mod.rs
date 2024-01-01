@@ -9,6 +9,7 @@ mod privilege;
 
 /// An implementation of `ucred` structure.
 #[derive(Debug, Clone)]
+#[allow(unused)]
 pub struct Ucred {
     effective_uid: i32, // cr_uid
     real_uid: i32,      // cr_ruid
