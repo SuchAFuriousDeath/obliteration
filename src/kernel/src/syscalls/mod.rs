@@ -13,8 +13,10 @@ mod output;
 
 /// Provides PS4 kernel routines for PS4 application and system libraries.
 pub struct Syscalls {
-    handlers: [Option<Box<dyn Fn(&SysIn) -> Result<SysOut, SysErr> + Send + Sync>>; 678],
+    handlers: [Option<Box<SyscallHandler>>; 678],
 }
+
+type SyscallHandler = dyn Fn(&SysIn) -> Result<SysOut, SysErr> + Send + Sync;
 
 impl Syscalls {
     pub fn new() -> Self {

@@ -22,7 +22,6 @@ use macros::vpath;
 use param::Param;
 use std::io::Error as IoError;
 use std::io::Write;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
 use thiserror::Error;

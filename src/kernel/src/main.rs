@@ -4,7 +4,6 @@ use crate::log::{print, LOGGER};
 use crate::ucred::AuthInfo;
 use clap::{Parser, ValueEnum};
 use kernel::RunError;
-use llt::Thread;
 use param::Param;
 use serde::Deserialize;
 use std::fs::{create_dir_all, remove_dir_all, File};
