@@ -16,14 +16,14 @@ use std::sync::Arc;
 ///
 /// This is an implementation of
 /// https://github.com/freebsd/freebsd-src/blob/release/9.1.0/sys/kern/kern_sysctl.c.
-pub struct Sysctl {
-    arnd: Arc<Arnd>,
+pub struct Sysctl<'kernel> {
+    arnd: &'kernel Arnd,
     mm: Arc<MemoryManager>,
     machdep: Arc<MachDep>,
 }
 
 #[allow(dead_code)]
-impl Sysctl {
+impl<'kernel> Sysctl<'kernel> {
     pub const CTL_MAXNAME: usize = 24;
 
     pub const CTLTYPE: u32 = 0xf;
@@ -94,13 +94,13 @@ impl Sysctl {
     pub const HW_PAGESIZE: i32 = 7;
 
     pub fn new(
-        arnd: &Arc<Arnd>,
+        arnd: &'kernel Arnd,
         mm: &Arc<MemoryManager>,
         machdep: &Arc<MachDep>,
         sys: &mut Syscalls,
     ) -> Arc<Self> {
         let ctl = Arc::new(Self {
-            arnd: arnd.clone(),
+            arnd,
             mm: mm.clone(),
             machdep: machdep.clone(),
         });
@@ -258,7 +258,7 @@ impl Sysctl {
         req: &mut SysctlReq,
     ) -> Result<(), SysErr> {
         // Check input size.
-        let newlen = req.new.as_ref().map(|b| b.len()).unwrap_or(0);
+        let newlen = req.new.as_ref().map_or(0, |b| b.len());
 
         if newlen == 0 {
             return Err(SysErr::Raw(ENOENT));
@@ -339,7 +339,7 @@ impl Sysctl {
         req: &mut SysctlReq,
     ) -> Result<(), SysErr> {
         // Check the buffer.
-        let oldlen = req.old.as_ref().map(|b| b.len()).unwrap_or(0);
+        let oldlen = req.old.as_ref().map_or(0, |b| b.len());
 
         if oldlen >= 73 {
             return Err(SysErr::Raw(EINVAL));
@@ -396,10 +396,7 @@ impl Sysctl {
         req.write(&td.proc().ptc().to_ne_bytes())?;
 
         td.proc().uptc().store(
-            req.old
-                .as_mut()
-                .map(|v| v.as_mut_ptr())
-                .unwrap_or(null_mut()),
+            req.old.as_mut().map_or(null_mut(), |v| v.as_mut_ptr()),
             Ordering::Relaxed,
         );
 
@@ -427,7 +424,7 @@ impl Sysctl {
         req: &mut SysctlReq,
     ) -> Result<(), SysErr> {
         let mut buf = [0; 256];
-        let len = min(req.old.as_ref().map(|b| b.len()).unwrap_or(0), 256);
+        let len = min(256, req.old.as_ref().map_or(0, |b| b.len()));
 
         self.arnd.rand_bytes(&mut buf[..len]);
 
