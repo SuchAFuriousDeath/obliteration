@@ -48,13 +48,11 @@ impl<E: ExecutionEngine> Kernel<E> {
     pub const LIBC_INTERNAL_PATH: &'static VPath =
         vpath!("/system/common/lib/libSceLibcInternal.sprx");
 
-    pub fn new(
-        args: Args,
-        param: Arc<Param>,
-        auth: AuthInfo,
-        ee: Arc<E>,
-    ) -> Result<Arc<Self>, KernelError<E>> {
+    pub fn new(args: Args, param: Arc<Param>, ee: Arc<E>) -> Result<Arc<Self>, KernelError<E>> {
         let mut syscalls = Syscalls::new();
+
+        // Get auth info for the process.
+        let auth = AuthInfo::from_title_id(param.title_id()).ok_or(KernelError::TitleIdInvalid)?;
 
         let cred = Arc::new(Ucred::new(
             0,
@@ -212,6 +210,9 @@ impl<E: ExecutionEngine> Kernel<E> {
 
 #[derive(Error, Debug)]
 pub enum KernelError<E: ExecutionEngine> {
+    #[error("title id is invalid")]
+    TitleIdInvalid,
+
     #[error("failed to construct filesystem: {0}")]
     FsError(#[from] FsError),
 
@@ -230,9 +231,6 @@ pub enum KernelError<E: ExecutionEngine> {
 
 #[derive(Error, Debug)]
 pub enum RunError<E: ExecutionEngine> {
-    #[error("title id is invalid")]
-    TitleIdInvalid,
-
     #[error("failed to construct kernel: {0}")]
     KernelError(#[from] KernelError<E>),
 

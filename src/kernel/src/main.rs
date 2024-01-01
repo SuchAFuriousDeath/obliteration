@@ -136,12 +136,9 @@ fn run_inner<E: crate::ee::ExecutionEngine>(
     param: Arc<Param>,
     ee: Arc<E>,
 ) -> Result<(), RunError<E>> {
-    // Get auth info for the process.
-    let auth = AuthInfo::from_title_id(param.title_id()).ok_or(RunError::TitleIdInvalid)?;
-
     print_hwinfo(&args, &param);
 
-    let kernel = Kernel::new(args, param, auth, ee)?;
+    let kernel = Kernel::new(args, param, ee)?;
 
     kernel.run()
 }
