@@ -26,11 +26,11 @@ pub struct Memory {
 }
 
 impl Memory {
-    pub(super) fn new<N: Into<String>>(
+    pub(super) fn new(
         mm: &Arc<MemoryManager>,
         image: &Elf<VFile>,
         base: usize,
-        name: N,
+        name: impl Into<String>,
     ) -> Result<Self, MapError> {
         // It seems like the PS4 expected to have only one for each text, data and relo program.
         let mut segments: Vec<MemorySegment> = Vec::with_capacity(3 + 2);

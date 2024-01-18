@@ -25,29 +25,25 @@ impl LlvmEngine {
         module: &Module<Self>,
     ) -> Result<crate::llvm::module::ExecutionEngine, LiftError> {
         // Get a list of public functions.
-        let path = module.path();
         let targets = match module.entry() {
-            Some(v) => vec![v],
-            None => Vec::new(),
+            Some(v) => vec![v].into_boxed_slice(),
+            None => Box::new([]),
         };
 
         // Lift the public functions.
-        let mut lifting = self.llvm.create_module(path);
-        let mut codegen = Codegen::new(&mut lifting);
+        let mut lifting = self.llvm.create_module(module.path());
+        let mut codegen = Codegen::new(&mut lifting, module);
 
-        for &addr in &targets {
-            if let Err(e) = codegen.lift(addr) {
-                return Err(LiftError::LiftingFailed(path.to_owned(), addr, e));
-            }
+        for addr in targets.into_iter() {
+            codegen
+                .lift(*addr)
+                .map_err(|e| LiftError::LiftingFailed(*addr, e))?;
         }
 
         drop(codegen);
 
         // Create LLVM execution engine.
-        let lifted = match lifting.create_execution_engine() {
-            Ok(v) => v,
-            Err(e) => return Err(LiftError::CreateExecutionEngineFailed(path.to_owned(), e)),
-        };
+        let lifted = lifting.create_execution_engine()?;
 
         Ok(lifted)
     }
@@ -63,7 +59,9 @@ impl ExecutionEngine for LlvmEngine {
     }
 
     fn setup_module(self: &Arc<Self>, md: &mut Module<Self>) -> Result<(), Self::SetupModuleErr> {
-        todo!()
+        self.lift(md)
+            .map(|_| ())
+            .map_err(|e| SetupModuleError::LiftFailed(md.path().to_owned(), e))
     }
 
     unsafe fn get_function(
@@ -91,7 +89,10 @@ impl super::RawFn for RawFn {
 
 /// An implementation of [`ExecutionEngine::SetupModuleErr`].
 #[derive(Debug, Error)]
-pub enum SetupModuleError {}
+pub enum SetupModuleError {
+    #[error("failed to lift module {0}")]
+    LiftFailed(VPathBuf, LiftError),
+}
 
 /// An implementation of [`ExecutionEngine::GetFunctionErr`].
 #[derive(Debug, Error)]
@@ -99,10 +100,10 @@ pub enum GetFunctionError {}
 
 /// Represents an error when module lifting is failed.
 #[derive(Debug, Error)]
-enum LiftError {
-    #[error("cannot lift function {1:#018x} on {0}")]
-    LiftingFailed(VPathBuf, usize, #[source] self::codegen::LiftError),
+pub enum LiftError {
+    #[error("cannot lift function {0:#018x}")]
+    LiftingFailed(usize, #[source] self::codegen::LiftError),
 
     #[error("cannot create LLVM execution engine for {0}")]
-    CreateExecutionEngineFailed(VPathBuf, #[source] crate::llvm::Error),
+    CreateExecutionEngineFailed(#[from] crate::llvm::error::Error),
 }

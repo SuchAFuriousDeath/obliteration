@@ -1,11 +1,12 @@
-use self::module::LlvmModule;
-use llvm_sys::core::{LLVMContextCreate, LLVMContextDispose, LLVMModuleCreateWithNameInContext};
+use self::module::{LlvmModule, Types};
+use llvm_sys::core::*;
 use llvm_sys::prelude::LLVMContextRef;
-use std::ffi::{c_char, CStr, CString};
-use std::fmt::Display;
+use std::ffi::CString;
 use std::sync::{Arc, Mutex};
 
-pub mod module;
+pub(self) mod error;
+pub(self) mod module;
+pub(self) mod types;
 
 /// A LLVM wrapper for thread-safe.
 #[derive(Debug)]
@@ -15,19 +16,22 @@ pub struct Llvm {
 
 impl Llvm {
     pub fn new() -> Arc<Self> {
-        let context = unsafe { LLVMContextCreate() };
-
         Arc::new(Self {
-            context: Mutex::new(context),
+            context: Mutex::new(unsafe { LLVMContextCreate() }),
         })
     }
 
     pub fn create_module(self: &Arc<Self>, name: &str) -> LlvmModule {
-        let context = self.context.lock().unwrap();
-        let name = CString::new(name).unwrap();
-        let module = unsafe { LLVMModuleCreateWithNameInContext(name.as_ptr(), *context) };
+        let (module, builder, types) = self.with_context(|ctx| unsafe {
+            let name = CString::new(name).unwrap();
+            let module = LLVMModuleCreateWithNameInContext(name.as_ptr(), ctx);
+            let builder = LLVMCreateBuilderInContext(ctx);
+            let types = Types::from_context(ctx);
 
-        LlvmModule::new(self, module)
+            (module, builder, types)
+        });
+
+        LlvmModule::new(self, module, builder, types)
     }
 
     fn with_context<F, R>(&self, f: F) -> R
@@ -46,33 +50,3 @@ impl Drop for Llvm {
 
 unsafe impl Send for Llvm {}
 unsafe impl Sync for Llvm {}
-
-/// A wrapper on LLVM error.
-#[derive(Debug)]
-pub struct Error {
-    message: String,
-}
-
-impl Error {
-    /// # Safety
-    /// `message` must be pointed to a null-terminated string allocated with `malloc` or a
-    /// compatible funtion because this method will free it with `free`.
-    unsafe fn new(message: *mut c_char) -> Self {
-        let owned = CStr::from_ptr(message)
-            .to_string_lossy()
-            .trim_end_matches('.')
-            .to_owned();
-
-        libc::free(message as _);
-
-        Self { message: owned }
-    }
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.message)
-    }
-}
-
-impl std::error::Error for Error {}

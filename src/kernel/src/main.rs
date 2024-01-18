@@ -201,7 +201,6 @@ fn main() -> ExitCode {
 
     // Initialize foundations.
     let arnd = Arnd::new();
-    let llvm = Llvm::new();
     let mut syscalls = Syscalls::new();
 
     // Initializes filesystem.
@@ -267,7 +266,7 @@ fn main() -> ExitCode {
             syscalls,
             &fs,
             &mm,
-            crate::ee::llvm::LlvmEngine::new(&llvm),
+            crate::ee::llvm::LlvmEngine::new(&Llvm::new()),
         ),
     }
 }
@@ -386,7 +385,7 @@ fn run<E: crate::ee::ExecutionEngine>(
     let boot = ld.kernel().unwrap();
     let mut arg = Box::pin(EntryArg::<E>::new(arnd, &proc, mm, app.clone()));
     let entry = unsafe { boot.get_function(boot.entry().unwrap()) };
-    let entry = move || unsafe { entry.exec1(arg.as_mut().as_vec().as_ptr()) };
+    let entry = move || unsafe { entry.exec1(arg.as_mut().as_ptr()) };
 
     // Spawn main thread.
     info!("Starting application.");

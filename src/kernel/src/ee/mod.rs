@@ -77,7 +77,11 @@ impl<E: ExecutionEngine> EntryArg<E> {
         }
     }
 
-    pub fn as_vec(self: Pin<&mut Self>) -> &Vec<usize> {
+    pub fn as_ptr(self: Pin<&mut Self>) -> *const usize {
+        self.as_slice().as_ptr()
+    }
+
+    fn as_slice(self: Pin<&mut Self>) -> &[usize] {
         let pin = unsafe { self.get_unchecked_mut() };
         let mem = pin.app.memory();
         let mut argc = 0;
@@ -134,6 +138,6 @@ impl<E: ExecutionEngine> EntryArg<E> {
         pin.vec.push(0); // AT_NULL
         pin.vec.push(0);
 
-        &pin.vec
+        pin.vec.as_ref()
     }
 }
