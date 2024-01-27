@@ -39,10 +39,12 @@ impl VFile {
         &mut self.flags
     }
 
+    /// An implementation of `fo_write`.
     pub fn write(&self, data: &[u8], td: Option<&VThread>) -> Result<usize, Box<dyn Errno>> {
         (self.ops.write)(self, data, td)
     }
 
+    /// An implementation of `fo_ioctl`.
     pub fn ioctl(
         &self,
         cmd: IoCmd,
@@ -52,6 +54,7 @@ impl VFile {
         (self.ops.ioctl)(self, cmd, data, td)
     }
 
+    /// An implementation of `fo_stat`.
     pub fn stat(
         &self,
         stat: &mut Stat,
@@ -59,6 +62,11 @@ impl VFile {
         td: Option<&VThread>,
     ) -> Result<(), Box<dyn Errno>> {
         (self.ops.stat)(self, stat, cred, td)
+    }
+
+    /// An implementation of `fo_close`.
+    pub fn close(&self, td: Option<&VThread>) -> Result<(), Box<dyn Errno>> {
+        (self.ops.close)(self, td)
     }
 }
 
@@ -86,9 +94,11 @@ pub struct VFileOps {
     pub write: fn(&VFile, &[u8], Option<&VThread>) -> Result<usize, Box<dyn Errno>>,
     pub ioctl: fn(&VFile, IoCmd, &mut [u8], Option<&VThread>) -> Result<(), Box<dyn Errno>>,
     pub stat: VFileStat,
+    pub close: VFileclose,
 }
 
 type VFileStat = fn(&VFile, &mut Stat, &Ucred, Option<&VThread>) -> Result<(), Box<dyn Errno>>;
+type VFileclose = fn(&VFile, Option<&VThread>) -> Result<(), Box<dyn Errno>>;
 
 bitflags! {
     /// Flags for [`VFile`].
