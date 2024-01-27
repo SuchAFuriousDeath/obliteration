@@ -1,6 +1,8 @@
+use super::stat::Stat;
 use super::{IoCmd, Vnode};
 use crate::errno::Errno;
 use crate::process::VThread;
+use crate::ucred::Ucred;
 use bitflags::bitflags;
 use std::any::Any;
 use std::io::{Read, Seek, SeekFrom};
@@ -49,6 +51,15 @@ impl VFile {
     ) -> Result<(), Box<dyn Errno>> {
         (self.ops.ioctl)(self, cmd, data, td)
     }
+
+    pub fn stat(
+        &self,
+        stat: &mut Stat,
+        cred: &Ucred,
+        td: Option<&VThread>,
+    ) -> Result<(), Box<dyn Errno>> {
+        (self.ops.stat)(self, stat, cred, td)
+    }
 }
 
 impl Seek for VFile {
@@ -74,7 +85,10 @@ pub enum VFileType {
 pub struct VFileOps {
     pub write: fn(&VFile, &[u8], Option<&VThread>) -> Result<usize, Box<dyn Errno>>,
     pub ioctl: fn(&VFile, IoCmd, &mut [u8], Option<&VThread>) -> Result<(), Box<dyn Errno>>,
+    pub stat: VFileStat,
 }
+
+type VFileStat = fn(&VFile, &mut Stat, &Ucred, Option<&VThread>) -> Result<(), Box<dyn Errno>>;
 
 bitflags! {
     /// Flags for [`VFile`].

@@ -33,6 +33,7 @@ mod ioctl;
 mod mount;
 mod path;
 mod perm;
+mod stat;
 mod tmp;
 mod vnode;
 
