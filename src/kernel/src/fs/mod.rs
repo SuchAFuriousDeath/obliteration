@@ -1,7 +1,8 @@
 use crate::errno::{Errno, EBADF, EBUSY, EEXIST, EINVAL, ENAMETOOLONG, ENODEV, ENOENT, ESPIPE};
 use crate::info;
-use crate::process::{GetFileError, VThread};
+use crate::process::{GetFileError, PollFd, VThread};
 use crate::syscalls::{SysArg, SysErr, SysIn, SysOut, Syscalls};
+use crate::time::TimeVal;
 use crate::ucred::PrivilegeError;
 use crate::ucred::{Privilege, Ucred};
 use bitflags::bitflags;
@@ -11,6 +12,7 @@ use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::num::TryFromIntError;
 use std::path::PathBuf;
+use std::slice;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -189,7 +191,7 @@ impl Fs {
         // So we decided to implement our own lookup algorithm.
         let path = path.as_ref();
         let root = match td {
-            Some(td) => td.proc().files().root(),
+            Some(td) => td.proc().filedesc().root(),
             None => self.root(),
         };
 
@@ -197,7 +199,7 @@ impl Fs {
         let mut vn = if path.is_absolute() {
             root.clone()
         } else if let Some(td) = td {
-            td.proc().files().cwd()
+            td.proc().filedesc().cwd()
         } else {
             root.clone()
         };
@@ -421,7 +423,7 @@ impl Fs {
         *file.flags_mut() = flags.into_fflags();
 
         // Install to descriptor table.
-        let fd = td.proc().files().alloc(Arc::new(file));
+        let fd = td.proc().filedesc().alloc(Arc::new(file));
 
         info!("File descriptor {fd} was allocated for {path}.");
 
@@ -433,7 +435,7 @@ impl Fs {
 
         info!("Closing fd {fd}.");
 
-        td.proc().files().free(fd)?;
+        td.proc().filedesc().free(fd)?;
 
         Ok(SysOut::ZERO)
     }
@@ -452,7 +454,7 @@ impl Fs {
 
     /// See `kern_ioctl` on the PS4 for a reference.
     fn ioctl(self: &Arc<Self>, fd: i32, cmd: IoCmd, td: &VThread) -> Result<SysOut, IoctlError> {
-        let file = td.proc().files().get(fd)?;
+        let file = td.proc().filedesc().get(fd)?;
 
         if !file
             .flags()
@@ -522,7 +524,7 @@ impl Fs {
     }
 
     fn readv(&self, fd: i32, uio: UioMut, td: &VThread) -> Result<SysOut, SysErr> {
-        let file = td.proc().files().get_for_read(fd)?;
+        let file = td.proc().filedesc().get_for_read(fd)?;
 
         let read = file.do_read(uio, Offset::Current, Some(td))?;
 
@@ -540,7 +542,7 @@ impl Fs {
     }
 
     fn writev(&self, fd: i32, uio: Uio, td: &VThread) -> Result<SysOut, SysErr> {
-        let file = td.proc().files().get_for_write(fd)?;
+        let file = td.proc().filedesc().get_for_write(fd)?;
 
         let written = file.do_write(uio, Offset::Current, Some(td))?;
 
@@ -648,7 +650,7 @@ impl Fs {
     }
 
     fn preadv(&self, fd: i32, uio: UioMut, offset: i64, td: &VThread) -> Result<SysOut, SysErr> {
-        let file = td.proc().files().get_for_read(fd)?;
+        let file = td.proc().filedesc().get_for_read(fd)?;
 
         let vnode = file.vnode().ok_or(SysErr::Raw(ESPIPE))?;
 
@@ -673,7 +675,7 @@ impl Fs {
     }
 
     fn pwritev(&self, fd: i32, uio: Uio, offset: i64, td: &VThread) -> Result<SysOut, SysErr> {
-        let file = td.proc().files().get_for_write(fd)?;
+        let file = td.proc().filedesc().get_for_write(fd)?;
 
         let vnode = file.vnode().ok_or(SysErr::Raw(ESPIPE))?;
 
@@ -723,13 +725,30 @@ impl Fs {
         self.mkdirat(At::Cwd, path, mode, Some(td))
     }
 
-    #[allow(unused_variables)]
-    fn sys_poll(self: &Arc<Self>, _td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
+    fn sys_poll(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         let fds: *mut PollFd = i.args[0].into();
         let nfds: u32 = i.args[1].try_into().unwrap();
         let timeout: i32 = i.args[2].try_into().unwrap();
 
-        todo!()
+        let fds = unsafe { slice::from_raw_parts_mut(fds, nfds as usize) };
+
+        let timeval = if timeout != -1 {
+            TimeVal::from_microseconds(timeout)?
+        } else {
+            TimeVal::ZERO
+        };
+
+        let filedesc = td.proc().filedesc();
+
+        let nfds = loop {
+            if let Some(nfds) = filedesc.pollscan(fds, td)? {
+                break nfds;
+            }
+
+            todo!()
+        };
+
+        Ok(nfds.into())
     }
 
     fn sys_lseek(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
@@ -741,7 +760,7 @@ impl Fs {
             whence.try_into()?
         };
 
-        let file = td.proc().files().get(fd)?;
+        let file = td.proc().filedesc().get(fd)?;
 
         let vnode = file.vnode().ok_or(SysErr::Raw(ESPIPE))?;
 
@@ -796,7 +815,7 @@ impl Fs {
     fn ftruncate(&self, fd: i32, length: i64, td: &VThread) -> Result<(), FileTruncateError> {
         let length = length.try_into()?;
 
-        let file = td.proc().files().get(fd)?;
+        let file = td.proc().filedesc().get(fd)?;
 
         if !file.flags().contains(VFileFlags::WRITE) {
             return Err(FileTruncateError::FileNotWritable);
@@ -1080,12 +1099,6 @@ bitflags! {
     pub struct RevokeFlags: i32 {
         const REVOKE_ALL = 0x0001;
     }
-}
-
-struct PollFd {
-    fd: i32,
-    events: i16,  // TODO: this probably deserves its own type
-    revents: i16, // likewise
 }
 
 pub struct TruncateLength(i64);

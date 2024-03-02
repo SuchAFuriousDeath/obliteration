@@ -2,6 +2,7 @@ use crate::budget::BudgetType;
 use crate::errno::{Errno, EBADF};
 use crate::fs::{VFile, VFileFlags, VFileType, Vnode};
 use crate::kqueue::KernelQueue;
+use bitflags::bitflags;
 use gmtx::{Gutex, GutexGroup};
 use macros::Errno;
 use std::collections::VecDeque;
@@ -9,6 +10,8 @@ use std::convert::Infallible;
 use std::num::{NonZeroI32, TryFromIntError};
 use std::sync::Arc;
 use thiserror::Error;
+
+use super::VThread;
 
 /// An implementation of `filedesc` structure.
 #[derive(Debug)]
@@ -50,6 +53,38 @@ impl FileDesc {
 
     pub fn cmask(&self) -> u32 {
         self.cmask
+    }
+
+    pub fn pollscan(
+        &self,
+        fds: &mut [PollFd],
+        td: &VThread,
+    ) -> Result<Option<NonZeroI32>, PollScanError> {
+        let files = self.files.read();
+
+        let mut n = None;
+
+        for pfd in fds {
+            let fd = pfd.fd;
+
+            match fd {
+                ..=-1 => pfd.revents = PollEvents::empty(),
+                _ => match files.get(fd as usize) {
+                    Some(Some(file)) => {
+                        pfd.revents = file.poll(pfd.events, td);
+
+                        if pfd.revents.intersects(PollEvents::HungUp) {
+                            pfd.revents.remove(PollEvents::Out);
+                        }
+
+                        todo!()
+                    }
+                    _ => pfd.revents = PollEvents::NoValue,
+                },
+            }
+        }
+
+        Ok(n)
     }
 
     #[allow(unused_variables)] // TODO: remove when implementing; add budget argument
@@ -147,6 +182,32 @@ impl FileDesc {
         }
     }
 }
+
+#[repr(C)]
+pub struct PollFd {
+    fd: i32,
+    events: PollEvents,  // TODO: this probably deserves its own type
+    revents: PollEvents, // likewise
+}
+
+bitflags! {
+    #[repr(transparent)]
+    #[derive(Debug, Clone, Copy)]
+    pub struct PollEvents: u16 {
+        const In = 0x0001;
+        const Pri = 0x0002;
+        const Out = 0x0004;
+        const Error = 0x0008;
+        const HungUp = 0x0010;
+        const NoValue = 0x0020;
+        const ReaddNorm = 0x0040;
+        const ReaddBand = 0x0080;
+        const WriteBand = 0x0100;
+    }
+}
+
+#[derive(Debug, Error, Errno)]
+pub enum PollScanError {}
 
 #[derive(Debug, Error, Errno)]
 pub enum GetFileError {

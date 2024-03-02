@@ -4,7 +4,7 @@ use crate::errno::Errno;
 use crate::errno::{EINVAL, ENOTTY, ENXIO, EOPNOTSUPP};
 use crate::kqueue::KernelQueue;
 use crate::net::Socket;
-use crate::process::VThread;
+use crate::process::{PollEvents, VThread};
 use crate::shm::Shm;
 use bitflags::bitflags;
 use macros::Errno;
@@ -119,6 +119,17 @@ impl VFile {
         }
     }
 
+    pub fn poll(&self, events: PollEvents, td: &VThread) -> PollEvents {
+        match &self.ty {
+            VFileType::Vnode(vn) => vn.poll(self, events, td),
+            VFileType::Socket(so) | VFileType::IpcSocket(so) => so.poll(self, events, td),
+            VFileType::KernelQueue(kq) => kq.poll(self, events, td),
+            VFileType::SharedMemory(shm) => shm.poll(self, events, td),
+            VFileType::Device(dev) => dev.poll(self, events, td),
+            VFileType::Blockpool(bp) => bp.poll(self, events, td),
+        }
+    }
+
     pub fn stat(&self, td: Option<&VThread>) -> Result<Stat, Box<dyn Errno>> {
         match &self.ty {
             VFileType::Vnode(vn) => vn.stat(self, td),
@@ -219,6 +230,11 @@ pub trait FileBackend: Debug + Send + Sync + 'static {
         td: Option<&VThread>,
     ) -> Result<(), Box<dyn Errno>> {
         Err(Box::new(DefaultError::IoctlNotSupported))
+    }
+
+    #[allow(unused_variables)]
+    fn poll(self: &Arc<Self>, file: &VFile, events: PollEvents, td: &VThread) -> PollEvents {
+        PollEvents::empty()
     }
 
     #[allow(unused_variables)]

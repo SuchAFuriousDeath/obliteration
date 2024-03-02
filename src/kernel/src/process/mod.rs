@@ -135,7 +135,7 @@ impl VProc {
         &self.cred
     }
 
-    pub fn files(&self) -> &Arc<FileDesc> {
+    pub fn filedesc(&self) -> &Arc<FileDesc> {
         &self.files
     }
 

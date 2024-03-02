@@ -1,6 +1,7 @@
 use crate::errno::Errno;
 use crate::process::VThread;
 use crate::syscalls::{SysErr, SysIn, SysOut, Syscalls};
+use macros::Errno;
 use std::num::NonZeroI32;
 use std::sync::Arc;
 use thiserror::Error;
@@ -65,12 +66,18 @@ impl From<TimeVal> for TimeSpec {
 }
 
 #[repr(C)]
-struct TimeVal {
+pub struct TimeVal {
     sec: i64,  // tv_sec
     usec: i64, // tv_usec
 }
 
 impl TimeVal {
+    pub const ZERO: Self = Self { sec: 0, usec: 0 };
+
+    pub fn from_microseconds(msec: i32) -> Result<Self, FromMicroSecondsError> {
+        todo!()
+    }
+
     #[cfg(unix)]
     fn microtime() -> Result<Self, MicroTimeError> {
         use std::{mem::MaybeUninit, ptr::null_mut};
@@ -137,6 +144,9 @@ struct TimeZone {
     minuteswest: i32, // tz_minuteswest
     dsttime: i32,     // tz_dsttime
 }
+
+#[derive(Debug, Error, Errno)]
+pub enum FromMicroSecondsError {}
 
 #[derive(Debug, Error)]
 pub enum MicroTimeError {

@@ -8,7 +8,7 @@ use crate::{
         TruncateLength, Uio, UioMut, VFile, VFileFlags, VPathBuf,
     },
     memory::MemoryManager,
-    process::VThread,
+    process::{PollEvents, VThread},
     syscalls::{SysErr, SysIn, SysOut, Syscalls},
     ucred::{Gid, Ucred, Uid},
 };
@@ -49,7 +49,7 @@ impl SharedMemoryManager {
             return Err(SysErr::Raw(EINVAL));
         }
 
-        let filedesc = td.proc().files();
+        let filedesc = td.proc().filedesc();
 
         #[allow(unused_variables)] // TODO: remove when implementing.
         let mode = mode & filedesc.cmask() & 0o7777;
@@ -142,6 +142,10 @@ impl FileBackend for Shm {
         cmd: IoCmd,
         td: Option<&VThread>,
     ) -> Result<(), Box<dyn Errno>> {
+        todo!()
+    }
+
+    fn poll(self: &Arc<Self>, file: &VFile, events: PollEvents, td: &VThread) -> PollEvents {
         todo!()
     }
 

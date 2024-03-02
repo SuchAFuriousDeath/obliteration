@@ -2,7 +2,7 @@ use crate::{
     budget::BudgetType,
     errno::Errno,
     fs::{DefaultError, FileBackend, Stat, TruncateLength, VFile, VFileFlags, VFileType},
-    process::{FileDesc, VThread},
+    process::{FileDesc, PollEvents, VThread},
     syscalls::{SysErr, SysIn, SysOut, Syscalls},
 };
 use std::{
@@ -27,7 +27,7 @@ impl KernelQueueManager {
     }
 
     fn sys_kqueue(self: &Arc<Self>, td: &VThread, _: &SysIn) -> Result<SysOut, SysErr> {
-        let filedesc = td.proc().files();
+        let filedesc = td.proc().filedesc();
 
         let fd = filedesc.alloc_with_budget::<Infallible>(
             |_| {
@@ -59,6 +59,10 @@ impl KernelQueue {
 }
 
 impl FileBackend for KernelQueue {
+    fn poll(self: &Arc<Self>, file: &VFile, events: PollEvents, td: &VThread) -> PollEvents {
+        todo!()
+    }
+
     fn stat(self: &Arc<Self>, _: &VFile, _: Option<&VThread>) -> Result<Stat, Box<dyn Errno>> {
         let mut stat = Stat::zeroed();
 

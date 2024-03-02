@@ -37,21 +37,24 @@ impl NetManager {
             BudgetType::FdSocket
         };
 
-        let fd = td.proc().files().alloc_with_budget::<SocketCreateError>(
-            |_| {
-                let so = Socket::new(domain, ty, proto, td.cred(), td, None)?;
+        let fd = td
+            .proc()
+            .filedesc()
+            .alloc_with_budget::<SocketCreateError>(
+                |_| {
+                    let so = Socket::new(domain, ty, proto, td.cred(), td, None)?;
 
-                let ty = if domain == 1 {
-                    VFileType::IpcSocket(so)
-                } else {
-                    VFileType::Socket(so)
-                };
+                    let ty = if domain == 1 {
+                        VFileType::IpcSocket(so)
+                    } else {
+                        VFileType::Socket(so)
+                    };
 
-                Ok(ty)
-            },
-            VFileFlags::WRITE | VFileFlags::READ,
-            budget,
-        )?;
+                    Ok(ty)
+                },
+                VFileFlags::WRITE | VFileFlags::READ,
+                budget,
+            )?;
 
         Ok(fd.into())
     }
@@ -68,21 +71,24 @@ impl NetManager {
             BudgetType::FdSocket
         };
 
-        let fd = td.proc().files().alloc_with_budget::<SocketCreateError>(
-            |_| {
-                let so = Socket::new(domain, ty, proto, td.cred(), td, name)?;
+        let fd = td
+            .proc()
+            .filedesc()
+            .alloc_with_budget::<SocketCreateError>(
+                |_| {
+                    let so = Socket::new(domain, ty, proto, td.cred(), td, name)?;
 
-                let ty = if domain == 1 {
-                    VFileType::IpcSocket(so)
-                } else {
-                    VFileType::Socket(so)
-                };
+                    let ty = if domain == 1 {
+                        VFileType::IpcSocket(so)
+                    } else {
+                        VFileType::Socket(so)
+                    };
 
-                Ok(ty)
-            },
-            VFileFlags::WRITE | VFileFlags::READ,
-            budget,
-        )?;
+                    Ok(ty)
+                },
+                VFileFlags::WRITE | VFileFlags::READ,
+                budget,
+            )?;
 
         Ok(fd.into())
     }

@@ -47,9 +47,6 @@ impl From<usize> for SysOut {
 
 impl From<NonZeroI32> for SysOut {
     fn from(value: NonZeroI32) -> Self {
-        Self {
-            rax: value.get() as isize as usize, // Sign extended.
-            rdx: 0,
-        }
+        value.get().into()
     }
 }
