@@ -1,7 +1,7 @@
 use crate::arch::MachDep;
 use crate::budget::{Budget, BudgetManager, ProcType};
 use crate::dev::{
-    DebugManager, DebugManagerInitError, DipswInitError, DipswManager, TtyManager,
+    DebugManager, DebugManagerInitError, DipswInitError, DipswManager, DmemContainer, TtyManager,
     TtyManagerInitError,
 };
 use crate::dmem::{DmemManager, DmemManagerInitError};
@@ -15,7 +15,7 @@ use crate::log::{print, LOGGER};
 use crate::namedobj::NamedObjManager;
 use crate::net::NetManager;
 use crate::osem::OsemManager;
-use crate::process::{VProc, VProcInitError, VThread};
+use crate::process::{ProcManager, VThread};
 use crate::regmgr::RegMgr;
 use crate::rtld::{ExecError, LoadFlags, ModuleFlags, RuntimeLinker};
 use crate::shm::SharedMemoryManager;
@@ -115,11 +115,9 @@ fn run() -> Result<(), KernelError> {
 
     path.push("param.sfo");
 
-    // Open param.sfo.
-    let param = File::open(&path).map_err(KernelError::FailedToOpenGameParam)?;
-
     // Load param.sfo.
-    let param = Arc::new(Param::read(param)?);
+    let param = File::open(&path).map_err(KernelError::FailedToOpenGameParam)?;
+    let param = Arc::new(Param::read(param).map_err(KernelError::FailedToReadGameParam)?);
 
     // Get auth info for the process.
     let auth =
@@ -366,6 +364,7 @@ fn run() -> Result<(), KernelError> {
     NamedObjManager::new(&mut syscalls);
     OsemManager::new(&mut syscalls);
     UmtxManager::new(&mut syscalls);
+    let pmgr = ProcManager::new(&mut syscalls);
 
     // Initialize runtime linker.
     let ee = NativeEngine::new();
@@ -374,16 +373,17 @@ fn run() -> Result<(), KernelError> {
     // TODO: Get correct budget name from the PS4.
     let budget_id = budget.create(Budget::new("big app", ProcType::BigApp));
     let proc_root = fs.lookup(proc_root, true, None).unwrap();
-
-    let proc = VProc::new(
-        auth,
-        budget_id,
-        ProcType::BigApp,
-        dev::DmemContainer::One, // See sys_budget_set on the PS4.
-        proc_root,
-        system_component,
-        syscalls,
-    )?;
+    let proc = pmgr
+        .spawn(
+            auth,
+            budget_id,
+            ProcType::BigApp,
+            DmemContainer::One, // See sys_budget_set on the PS4.
+            proc_root,
+            system_component,
+            syscalls,
+        )
+        .map_err(KernelError::CreateProcessFailed)?;
 
     info!(
         "Application stack: {:p}:{:p}",
@@ -448,8 +448,6 @@ fn run() -> Result<(), KernelError> {
     if app.file_info().is_none() {
         todo!("statically linked eboot.bin");
     }
-
-    // TODO: Setup hypervisor.
 
     // Get entry point.
     let boot = ld.kernel().unwrap();
@@ -588,7 +586,7 @@ enum KernelError {
     FailedToOpenGameParam(#[source] std::io::Error),
 
     #[error("couldn't read param.sfo ")]
-    FailedToReadGameParam(#[from] param::ReadError),
+    FailedToReadGameParam(#[source] param::ReadError),
 
     #[error("{0} has an invalid title identifier")]
     InvalidTitleId(PathBuf),
@@ -614,8 +612,8 @@ enum KernelError {
     #[error("dmem manager initialization failed")]
     DmemManagerInitFailes(#[from] DmemManagerInitError),
 
-    #[error("virtual process initialization failed")]
-    VProcInitFailed(#[from] VProcInitError),
+    #[error("couldn't create application process")]
+    CreateProcessFailed(#[source] self::process::SpawnError),
 
     #[error("couldn't execute {0}")]
     ExecFailed(&'static VPath, #[source] ExecError),
