@@ -1,11 +1,8 @@
 use crate::{
-    errno::Errno,
-    fs::{
+    errno::Errno, fs::{
         make_dev, CharacterDevice, DeviceDriver, DriverFlags, IoCmd, MakeDevError, MakeDevFlags,
         Mode, OpenFlags,
-    },
-    process::VThread,
-    ucred::{Gid, Uid},
+    }, process::VThread, ucred::{Gid, Uid}
 };
 use std::sync::Arc;
 use thiserror::Error;
@@ -38,17 +35,7 @@ impl DeviceDriver for Gc {
         _: Option<&VThread>,
     ) -> Result<(), Box<dyn Errno>> {
         match cmd {
-            IoCmd::GCSETWAVELIMITMULTIPLIER(mult) => todo!("GCSETWAVELIMITMULTIPLIER: {mult:?}"),
-            IoCmd::GCSUBMIT(submit_arg) => todo!("GCSUBMIT ioctl: {submit_arg:?}"),
-            IoCmd::GCGETCUMASK(mask) => todo!("GCGETCUMASK ioctl: {mask:?}"),
-            IoCmd::GCMAPCOMPUTEQUEUE(queue) => todo!("GCMAPCOMPUTEQUEUE ioctl: {queue:?}"),
-            IoCmd::GCUNMAPCOMPUTEQUEUE(unk) => todo!("GCUNMAPCOMPUTEQUEUE ioctl: {unk:?}"),
-            IoCmd::GCSETGSRINGSIZES(unk1) => todo!("GCSETGSRINGSIZES ioctl: {unk1:?}"),
-            IoCmd::GCMIPSTATSREPORT(report) => todo!("GCMIPSTATSREPORT ioctl: {report:?}"),
-            IoCmd::GCARESUBMITSALLOWED(unk) => todo!("GCARESUBMITSALLOWED ioctl: {unk:?}"),
-            IoCmd::GCGETNUMTCAUNITS(num) => todo!("GCGETNUMTCAUNITS ioctl: {num:?}"),
-            IoCmd::GCDINGDONGFORWORKLOAD(unk) => todo!("GCDINGDONGFORWORKLOAD ioctl: {unk:?}"),
-            _ => todo!(),
+            _ => todo!("gc ioctl command {:?} not implemented", cmd),
         }
     }
 }
