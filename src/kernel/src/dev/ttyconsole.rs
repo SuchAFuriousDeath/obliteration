@@ -1,10 +1,10 @@
-use crate::errno::EPERM;
+use crate::errno::Errno;
 use crate::fs::{
-    make_dev, CharacterDevice, DeviceDriver, DriverFlags, IoCmd, MakeDevError, MakeDevFlags, Mode,
-    OpenFlags, Uio, UioMut,
+    make_dev, CharacterDevice, DeviceDriver, DriverFlags, IoCmd, IoLen, IoVec, IoVecMut,
+    MakeDevError, MakeDevFlags, Mode, OpenFlags,
 };
+use crate::process::VThread;
 use crate::ucred::{Gid, Uid};
-use crate::{errno::Errno, process::VThread};
 use macros::Errno;
 use std::sync::Arc;
 use thiserror::Error;
@@ -36,9 +36,10 @@ impl DeviceDriver for TtyConsole {
     fn read(
         &self,
         dev: &Arc<CharacterDevice>,
-        data: &mut UioMut,
+        off: Option<u64>,
+        buf: &mut [IoVecMut],
         td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+    ) -> Result<IoLen, Box<dyn Errno>> {
         todo!()
     }
 
@@ -46,9 +47,10 @@ impl DeviceDriver for TtyConsole {
     fn write(
         &self,
         dev: &Arc<CharacterDevice>,
-        data: &mut Uio,
+        off: Option<u64>,
+        buf: &[IoVec],
         td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+    ) -> Result<IoLen, Box<dyn Errno>> {
         todo!()
     }
 
@@ -86,13 +88,10 @@ impl Tty {
         self.generic_ioctl(cmd, td)
     }
 
-    /// See `tty_ioctl` on the PS4 for a reference.
-    fn generic_ioctl(&self, cmd: IoCmd, td: Option<&VThread>) -> Result<(), TtyIoctlError> {
-        // TODO: implement ttydevsw_ioctl
-
+    /// See `tty_generic_ioctl` on the PS4 for a reference.
+    fn generic_ioctl(&self, cmd: IoCmd, _td: Option<&VThread>) -> Result<(), TtyIoctlError> {
         match cmd {
-            // TODO: implement this properly
-            IoCmd::TIOCSCTTY => return Ok(()),
+            IoCmd::TIOCSCTTY => todo!(),
             _ => todo!(),
         }
     }
@@ -118,7 +117,7 @@ impl TtyManager {
             Gid::ROOT,
             Mode::new(0o600).unwrap(),
             None,
-            MakeDevFlags::MAKEDEV_ETERNAL,
+            MakeDevFlags::ETERNAL,
         )?;
 
         Ok(Arc::new(Self { console }))
@@ -134,8 +133,4 @@ pub enum TtyManagerInitError {
 
 /// Represents an error when [`Tty::ioctl`] fails to initialize.
 #[derive(Debug, Error, Errno)]
-pub enum TtyIoctlError {
-    #[error("process is not leader")]
-    #[errno(EPERM)]
-    ProcessNotLeader,
-}
+pub enum TtyIoctlError {}

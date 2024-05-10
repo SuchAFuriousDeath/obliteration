@@ -1,11 +1,13 @@
 use super::dirent::Dirent;
-use super::{AllocVnodeError, DevFs};
+use super::{AllocVnodeError, CdevFileBackend, DevFs};
 use crate::errno::{Errno, EIO, ENOENT, ENOTDIR, ENXIO};
 use crate::fs::{
-    check_access, Access, IoCmd, RevokeFlags, Uio, UioMut, Vnode, VnodeAttrs, VnodeType,
+    check_access, Access, FileBackend, IoCmd, IoLen, IoVec, IoVecMut, RevokeFlags, Vnode,
+    VnodeAttrs, VnodeFileBackend, VnodeItem, VnodeType,
 };
 use crate::process::VThread;
 use macros::Errno;
+use std::ops::Deref;
 use std::sync::Arc;
 use thiserror::Error;
 
@@ -169,26 +171,34 @@ impl crate::fs::VnodeBackend for VnodeBackend {
     }
 
     fn revoke(&self, vn: &Arc<Vnode>, _flags: RevokeFlags) -> Result<(), Box<dyn Errno>> {
-        // TODO: Implement this.
-        Ok(())
+        todo!()
     }
 
     fn read(
         &self,
-        #[allow(unused_variables)] vn: &Arc<Vnode>,
-        #[allow(unused_variables)] buf: &mut UioMut,
-        #[allow(unused_variables)] td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+        vn: &Arc<Vnode>,
+        off: u64,
+        buf: &mut [IoVecMut],
+        td: Option<&VThread>,
+    ) -> Result<IoLen, Box<dyn Errno>> {
         todo!()
     }
 
     fn write(
         &self,
-        #[allow(unused_variables)] vn: &Arc<Vnode>,
-        #[allow(unused_variables)] buf: &mut Uio,
-        #[allow(unused_variables)] td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+        vn: &Arc<Vnode>,
+        off: u64,
+        buf: &[IoVec],
+        td: Option<&VThread>,
+    ) -> Result<IoLen, Box<dyn Errno>> {
         todo!()
+    }
+
+    fn to_file_backend(&self, vn: &Arc<Vnode>) -> Box<dyn FileBackend> {
+        match vn.item().deref() {
+            Some(VnodeItem::Device(d)) => Box::new(CdevFileBackend::new(vn.clone(), d.clone())),
+            _ => Box::new(VnodeFileBackend::new(vn.clone())),
+        }
     }
 }
 

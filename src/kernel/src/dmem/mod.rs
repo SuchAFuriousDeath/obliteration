@@ -1,7 +1,8 @@
+use self::blockpool::BlockPool;
 use crate::dev::{Dmem, DmemContainer};
 use crate::errno::EINVAL;
 use crate::fs::{
-    make_dev, CharacterDevice, DriverFlags, Fs, MakeDevError, MakeDevFlags, Mode, VFile, VFileType,
+    make_dev, CharacterDevice, DriverFlags, Fs, MakeDevError, MakeDevFlags, Mode, VFile, VFileFlags,
 };
 use crate::info;
 use crate::process::VThread;
@@ -11,7 +12,7 @@ use std::ops::Index;
 use std::sync::Arc;
 use thiserror::Error;
 
-pub use self::blockpool::*;
+pub use self::blockpool::{BlockpoolExpandArgs, BlockpoolStats};
 
 mod blockpool;
 
@@ -43,7 +44,7 @@ impl DmemManager {
             let name = "dmem0";
             match make_dev(
                 Dmem::new(Self::DMEM_TOTAL_SIZE, DmemContainer::Zero),
-                DriverFlags::D_INIT,
+                DriverFlags::INIT,
                 0,
                 name,
                 Uid::ROOT,
@@ -61,7 +62,7 @@ impl DmemManager {
             let name = "dmem1";
             match make_dev(
                 Dmem::new(Self::DMEM_TOTAL_SIZE, DmemContainer::One),
-                DriverFlags::D_INIT,
+                DriverFlags::INIT,
                 0,
                 name,
                 Uid::ROOT,
@@ -79,7 +80,7 @@ impl DmemManager {
             let name = "dmem2";
             match make_dev(
                 Dmem::new(Self::DMEM_TOTAL_SIZE, DmemContainer::Two),
-                DriverFlags::D_INIT,
+                DriverFlags::INIT,
                 0,
                 name,
                 Uid::ROOT,
@@ -116,6 +117,8 @@ impl DmemManager {
         let dmem_container = td.proc().dmem_container_mut();
         let current_container = *dmem_container;
 
+        info!("Getting dmem container");
+
         if dmem_id != -1 {
             todo!()
         }
@@ -131,11 +134,13 @@ impl DmemManager {
         }
 
         let bp = BlockPool::new();
-
+        let flags = VFileFlags::from_bits_retain(flags) | VFileFlags::WRITE;
         let fd = td
             .proc()
             .files()
-            .alloc(Arc::new(VFile::new(VFileType::Blockpool(bp))));
+            .alloc(Arc::new(VFile::new(flags, Box::new(bp))));
+
+        info!("Opened a blockpool at fd = {fd}");
 
         Ok(fd.into())
     }

@@ -1,15 +1,11 @@
-use super::{CharacterDevice, IoCmd, Offset, Stat, TruncateLength, Uio, UioMut, Vnode};
-use crate::dmem::BlockPool;
-use crate::errno::Errno;
-use crate::errno::{EINVAL, ENOTTY, ENXIO, EOPNOTSUPP};
+use super::{IoCmd, IoLen, IoVecMut, Stat, TruncateLength, Vnode};
+use crate::errno::{Errno, EINVAL, ENOTTY, ENXIO, EOPNOTSUPP};
 use crate::fs::{IoVec, PollEvents};
-use crate::kqueue::KernelQueue;
-use crate::net::Socket;
 use crate::process::VThread;
-use crate::shm::SharedMemory;
 use bitflags::bitflags;
 use gmtx::{Gutex, GutexGroup};
 use macros::Errno;
+use std::any::{Any, TypeId};
 use std::fmt::Debug;
 use std::io::{ErrorKind, Read, Seek, SeekFrom};
 use std::sync::Arc;
@@ -18,19 +14,19 @@ use thiserror::Error;
 /// An implementation of `file` structure.
 #[derive(Debug)]
 pub struct VFile {
-    ty: VFileType,      // f_type
     flags: VFileFlags,  // f_flag
-    offset: Gutex<i64>, // f_offset
+    offset: Gutex<u64>, // f_offset
+    backend: Box<dyn FileBackend>,
 }
 
 impl VFile {
-    pub fn new(ty: VFileType) -> Self {
+    pub fn new(flags: VFileFlags, backend: Box<dyn FileBackend>) -> Self {
         let gg = GutexGroup::new();
 
         Self {
-            ty,
-            flags: VFileFlags::empty(),
+            flags,
             offset: gg.spawn(0),
+            backend,
         }
     }
 
@@ -38,82 +34,20 @@ impl VFile {
         self.flags
     }
 
-    pub fn flags_mut(&mut self) -> &mut VFileFlags {
-        &mut self.flags
+    pub fn is_seekable(&self) -> bool {
+        self.backend.is_seekable()
     }
 
-    /// Checking if this returns `Some` is equivalent to when FreeBSD and the PS4 check
-    /// fp->f_ops->fo_flags & DFLAG_SEEKABLE != 0, therefore we use this instead.
-    pub fn seekable_vnode(&self) -> Option<&Arc<Vnode>> {
-        match &self.ty {
-            VFileType::Vnode(vn) => Some(vn),
-            VFileType::Device(_) => todo!(),
-            _ => None,
-        }
+    pub fn vnode(&self) -> Option<&Arc<Vnode>> {
+        self.backend.vnode()
     }
 
-    /// See `dofileread` on the PS4 for a reference.
-    pub fn do_read(&self, mut uio: UioMut, td: Option<&VThread>) -> Result<usize, Box<dyn Errno>> {
-        if uio.bytes_left == 0 {
-            return Ok(0);
-        }
-
-        // TODO: consider implementing ktrace.
-
-        todo!()
-    }
-
-    /// See `dofilewrite` on the PS4 for a reference.
-    pub fn do_write(&self, mut uio: Uio, td: Option<&VThread>) -> Result<usize, Box<dyn Errno>> {
-        // TODO: consider implementing ktrace.
-        // TODO: implement bwillwrite.
-
-        todo!()
-    }
-
-    fn read(&self, buf: &mut UioMut, td: Option<&VThread>) -> Result<(), Box<dyn Errno>> {
-        match &self.ty {
-            VFileType::Vnode(vn) => FileBackend::read(vn, self, buf, td),
-            VFileType::Socket(so) | VFileType::IpcSocket(so) => so.read(self, buf, td),
-            VFileType::KernelQueue(kq) => kq.read(self, buf, td),
-            VFileType::SharedMemory(shm) => shm.read(self, buf, td),
-            VFileType::Device(dev) => dev.read(self, buf, td),
-            VFileType::Blockpool(bp) => bp.read(self, buf, td),
-        }
-    }
-
-    fn write(&self, buf: &mut Uio, td: Option<&VThread>) -> Result<(), Box<dyn Errno>> {
-        match &self.ty {
-            VFileType::Vnode(vn) => FileBackend::write(vn, self, buf, td),
-            VFileType::Socket(so) | VFileType::IpcSocket(so) => so.write(self, buf, td),
-            VFileType::KernelQueue(kq) => kq.write(self, buf, td),
-            VFileType::SharedMemory(shm) => shm.write(self, buf, td),
-            VFileType::Device(dev) => dev.write(self, buf, td),
-            VFileType::Blockpool(bp) => bp.write(self, buf, td),
-        }
-    }
-
-    /// See `fo_ioctl` on the PS4 for a reference.
     pub fn ioctl(&self, cmd: IoCmd, td: Option<&VThread>) -> Result<(), Box<dyn Errno>> {
-        match &self.ty {
-            VFileType::Vnode(vn) => vn.ioctl(self, cmd, td),
-            VFileType::Socket(so) | VFileType::IpcSocket(so) => so.ioctl(self, cmd, td),
-            VFileType::KernelQueue(kq) => kq.ioctl(self, cmd, td),
-            VFileType::SharedMemory(shm) => shm.ioctl(self, cmd, td),
-            VFileType::Device(dev) => dev.ioctl(self, cmd, td),
-            VFileType::Blockpool(bp) => bp.ioctl(self, cmd, td),
-        }
+        self.backend.ioctl(self, cmd, td)
     }
 
     pub fn stat(&self, td: Option<&VThread>) -> Result<Stat, Box<dyn Errno>> {
-        match &self.ty {
-            VFileType::Vnode(vn) => vn.stat(self, td),
-            VFileType::Socket(so) | VFileType::IpcSocket(so) => so.stat(self, td),
-            VFileType::KernelQueue(kq) => kq.stat(self, td),
-            VFileType::SharedMemory(shm) => shm.stat(self, td),
-            VFileType::Device(dev) => dev.stat(self, td),
-            VFileType::Blockpool(bp) => bp.stat(self, td),
-        }
+        self.backend.stat(self, td)
     }
 
     pub fn truncate(
@@ -121,20 +55,37 @@ impl VFile {
         length: TruncateLength,
         td: Option<&VThread>,
     ) -> Result<(), Box<dyn Errno>> {
-        match &self.ty {
-            VFileType::Vnode(vn) => vn.truncate(self, length, td),
-            VFileType::Socket(so) | VFileType::IpcSocket(so) => so.truncate(self, length, td),
-            VFileType::KernelQueue(kq) => kq.truncate(self, length, td),
-            VFileType::SharedMemory(shm) => shm.truncate(self, length, td),
-            VFileType::Device(dev) => dev.truncate(self, length, td),
-            VFileType::Blockpool(bp) => bp.truncate(self, length, td),
+        self.backend.truncate(self, length, td)
+    }
+
+    /// Gets the `f_data` associated with this file.
+    ///
+    /// File implementation should use this method to check if the file has expected type. This
+    /// method should be impossible for non-file implementation to call because it required an
+    /// implementation of [`FileBackend`], which should not exposed by the subsystem itself. This
+    /// also imply the other subsystems cannot call this method with the other subsystem
+    /// implementation.
+    pub fn backend<T: FileBackend>(&self) -> Option<&T> {
+        // TODO: Use Any::downcast_ref() when https://github.com/rust-lang/rust/issues/65991 is
+        // stabilized. Our current implementation here is copied from Any::downcast_ref().
+        let b = self.backend.as_ref();
+
+        if b.type_id() == TypeId::of::<T>() {
+            Some(unsafe { &*(b as *const dyn FileBackend as *const T) })
+        } else {
+            None
         }
     }
 }
 
 impl Seek for VFile {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        self.seekable_vnode().ok_or(ErrorKind::Other)?;
+        use std::io::Error;
+
+        // Check if seekable.
+        if !self.backend.is_seekable() {
+            return Err(Error::from(ErrorKind::Unsupported));
+        }
 
         // Negative seeks should not be allowed here
         let offset: u64 = match pos {
@@ -147,68 +98,35 @@ impl Seek for VFile {
             }
         };
 
-        *self.offset.write() = if let Ok(offset) = offset.try_into() {
-            offset
-        } else {
-            todo!()
-        };
+        *self.offset.get_mut() = offset;
 
-        Ok(offset as u64)
+        Ok(offset)
     }
 
     fn rewind(&mut self) -> std::io::Result<()> {
-        *self.offset.write() = 0;
-
+        *self.offset.get_mut() = 0;
         Ok(())
     }
 
     fn stream_position(&mut self) -> std::io::Result<u64> {
-        if let Ok(offset) = (*self.offset.read()).try_into() {
-            Ok(offset)
-        } else {
-            todo!()
-        }
+        Ok(*self.offset.get_mut())
     }
 }
 
 impl Read for VFile {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let total = buf.len();
+        let len = IoLen::from_usize(buf.len()).unwrap_or(IoLen::MAX);
+        let mut buf = unsafe { IoVecMut::new(buf.as_mut_ptr(), len) };
+        let off = *self.offset.get_mut();
+        let read = self
+            .backend
+            .read(self, off, std::slice::from_mut(&mut buf), None)
+            .map_err(|e| std::io::Error::new(ErrorKind::Other, e))?;
 
-        let ref mut iovec = IoVec::from_slice(buf);
+        *self.offset.get_mut() += read.get() as u64;
 
-        let mut offset = self.offset.write();
-
-        let mut uio = UioMut::from_single_vec(iovec, *offset);
-
-        if let Err(e) = VFile::read(self, &mut uio, None) {
-            println!("Error: {:?}", e);
-
-            todo!()
-        };
-
-        let read = total - uio.bytes_left;
-
-        if let Ok(read) = TryInto::<i64>::try_into(read) {
-            *offset += read;
-        } else {
-            todo!()
-        }
-
-        Ok(read)
+        Ok(read.get())
     }
-}
-
-/// Type of [`VFile`].
-#[derive(Debug)]
-pub enum VFileType {
-    Vnode(Arc<Vnode>),               // DTYPE_VNODE = 1
-    Socket(Arc<Socket>),             // DTYPE_SOCKET = 2,
-    KernelQueue(Arc<KernelQueue>),   // DTYPE_KQUEUE = 5,
-    SharedMemory(Arc<SharedMemory>), // DTYPE_SHM = 8,
-    Device(Arc<CharacterDevice>),    // DTYPE_DEV = 11,
-    IpcSocket(Arc<Socket>),          // DTYPE_IPCSOCKET = 15,
-    Blockpool(Arc<BlockPool>),       // DTYPE_BLOCKPOOL = 17,
 }
 
 bitflags! {
@@ -221,58 +139,61 @@ bitflags! {
 }
 
 /// An implementation of `fileops` structure.
-pub trait FileBackend: Debug + Send + Sync + 'static {
-    #[allow(unused_variables)]
+///
+/// The implementation is internal to the subsystem itself so it should not expose itself to the
+/// outside.
+pub trait FileBackend: Any + Debug + Send + Sync + 'static {
+    /// Implementation of `fo_flags` with `DFLAG_SEEKABLE`.
+    fn is_seekable(&self) -> bool;
+
     /// An implementation of `fo_read`.
     fn read(
-        self: &Arc<Self>,
+        &self,
         file: &VFile,
-        buf: &mut UioMut,
+        off: u64,
+        buf: &mut [IoVecMut],
         td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+    ) -> Result<IoLen, Box<dyn Errno>> {
         Err(Box::new(DefaultFileBackendError::ReadNotSupported))
     }
 
-    #[allow(unused_variables)]
     /// An implementation of `fo_write`.
     fn write(
-        self: &Arc<Self>,
+        &self,
         file: &VFile,
-        buf: &mut Uio,
+        off: u64,
+        buf: &[IoVec],
         td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+    ) -> Result<IoLen, Box<dyn Errno>> {
         Err(Box::new(DefaultFileBackendError::WriteNotSupported))
     }
 
-    #[allow(unused_variables)]
     /// An implementation of `fo_ioctl`.
-    fn ioctl(
-        self: &Arc<Self>,
-        file: &VFile,
-        cmd: IoCmd,
-        td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+    fn ioctl(&self, file: &VFile, cmd: IoCmd, td: Option<&VThread>) -> Result<(), Box<dyn Errno>> {
         Err(Box::new(DefaultFileBackendError::IoctlNotSupported))
     }
 
-    #[allow(unused_variables)]
     /// An implementation of `fo_poll`.
-    fn poll(self: &Arc<Self>, file: &VFile, events: PollEvents, td: &VThread) -> PollEvents;
+    fn poll(&self, file: &VFile, events: PollEvents, td: &VThread) -> PollEvents;
 
-    #[allow(unused_variables)]
     /// An implementation of `fo_stat`.
-    fn stat(self: &Arc<Self>, file: &VFile, td: Option<&VThread>) -> Result<Stat, Box<dyn Errno>>;
+    fn stat(&self, file: &VFile, td: Option<&VThread>) -> Result<Stat, Box<dyn Errno>>;
 
-    #[allow(unused_variables)]
     /// An implementation of `fo_truncate`.
     fn truncate(
-        self: &Arc<Self>,
+        &self,
         file: &VFile,
         length: TruncateLength,
         td: Option<&VThread>,
     ) -> Result<(), Box<dyn Errno>> {
         Err(Box::new(DefaultFileBackendError::TruncateNotSupported))
     }
+
+    /// Get a vnode associated with this file (if any).
+    ///
+    /// Usually this will be [`Some`] if the file was opened from a filesystem (e.g. `/dev/null`)
+    /// and [`None`] if the file is not living on the filesystem (e.g. kqueue).
+    fn vnode(&self) -> Option<&Arc<Vnode>>;
 }
 
 #[derive(Debug, Error, Errno)]

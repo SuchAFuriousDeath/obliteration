@@ -1,5 +1,9 @@
 use super::FioDeviceGetNameArg;
-use crate::dev::{DmemAllocate, DmemAvailable, DmemQuery, PrtAperture};
+use crate::dev::{
+    CuMask, DceFlipControlArg, DceRegisterBufferPtrsArg, DceSubmitFlipArg, DingDongForWorkload,
+    DmemAllocate, DmemAvailable, DmemQuery, MapComputeQueueArg, MipStatsReport, PrtAperture,
+    RngInput, SubmitArg, UnmapComputeQueueArg,
+};
 use crate::dmem::{BlockpoolExpandArgs, BlockpoolStats};
 use crate::errno::ENOTTY;
 use crate::syscalls::SysErr;
@@ -89,9 +93,23 @@ macro_rules! commands {
 commands! {
     pub enum IoCmd {
         /// sceKernelMemoryPoolExpand
-        BPOOLEXPAND(&mut BlockpoolExpandArgs) = 0xC020A801,
+        BPOOLEXPAND(&mut BlockpoolExpandArgs) = 0xc020a801,
         /// sceKernelMemoryPoolGetBlockStats
-        BPOOLSTATS(&mut BlockpoolStats) = 0x4010A802,
+        BPOOLSTATS(&mut BlockpoolStats) = 0x4010a802,
+
+        /// An unkown bnet command, called from libSceNet
+        BNETUNK(&Unknown36) = 0x802450c9,
+
+        /// Flip control.
+        DCEFLIPCONTROL(&mut DceFlipControlArg) = 0xC0308203,
+        /// Submit flip
+        DCESUBMITFLIP(&mut DceSubmitFlipArg) = 0xC0488204,
+        /// Register buffer pointers
+        DCEREGBUFPTRS(&mut DceRegisterBufferPtrsArg) = 0xC0308206,
+        /// Register buffer attribute
+        DCEREGBUFATTR(&mut Unknown48) = 0xC0308207,
+        /// Deregister identifier
+        DCEDEREGIDENT(&u64) = 0x80088209,
 
         /// Get media size in bytes.
         DIOCGMEDIASIZE(&mut i64) = 0x40086418,
@@ -103,24 +121,28 @@ commands! {
         /// sceKernelUnsetDipsw
         DIPSWUNSET(&Unknown2) = 0x80028802,
         /// sceKernelCheckDipsw
-        DIPSWCHECK(&mut Unknown8) = 0xC0088803,
+        DIPSWCHECK(&mut Unknown8) = 0xc0088803,
         /// sceKernelReadDipswData
         DIPSWREAD(&Unknown16) = 0x80108804,
         /// sceKernelWriteDipswData
         DIPSWWRITE(&Unknown16) = 0x80108805,
         /// sceKernelCheckDipsw
         DIPSWCHECK2(&mut i32) = 0x40048806,
+        /// Unkown dipsw command
+        DIPSWUNK(&mut i32) = 0x40048807,
 
+        /// Allocate direct memory
+        DMEMALLOC(&mut DmemAllocate) = 0xc0288001,
         /// Get total size?
         DMEMTOTAL(&mut usize) = 0x4008800a,
         /// Get PRT aperture
-        DMEMGETPRT(&mut PrtAperture) = 0xC018800C,
-        /// Get available memory size
-        DMEMGETAVAIL(&mut DmemAvailable) = 0xC0208016,
-        /// Allocate direct memory
-        DMEMALLOC(&mut DmemAllocate) = 0xC0288001,
+        DMEMGETPRT(&mut PrtAperture) = 0xc018800c,
+        /// Allocate main direct memory
+        DMEMALLOCMAIN(&mut DmemAllocate) = 0xc0288011,
         /// Query direct memory
         DMEMQUERY(&DmemQuery) = 0x80288012,
+        /// Get available memory size
+        DMEMGETAVAIL(&mut DmemAvailable) = 0xc0208016,
 
         /// Set close on exec on fd.
         FIOCLEX = 0x20006601,
@@ -142,15 +164,47 @@ commands! {
         FIOGETLBA(&mut i32) = 0x40046679,
         /// Get dev. name
         FIODGNAME(&FioDeviceGetNameArg) = 0x80106678,
+        /// Get # bytes (yet) to write
+        FIONWRITE(&mut i32) = 0x40046677,
+        /// Get space in send queue
+        FIONSPACE(&mut i32) = 0x40046676,
         /// Seek data.
-        FIOSEEKDATA(&mut i64) = 0xC0086661,
+        FIOSEEKDATA(&mut i64) = 0xc0086661,
         /// Seek hole.
-        FIOSEEKHOLE(&mut i64) = 0xC0086662,
+        FIOSEEKHOLE(&mut i64) = 0xc0086662,
 
-        /// Unkown rng command
-        RNG1 = 0x40445301,
-        /// Unkown rng command
-        RNG2 = 0x40445302,
+        /// Set wave limit multiplier
+        GCSETWAVELIMITMULTIPLIER(&mut i64) = 0xc0088101,
+        /// Submit
+        GCSUBMIT(&mut SubmitArg) = 0xc0108102,
+        /// Get CU mask
+        GCGETCUMASK(&mut CuMask) = 0xc010810b,
+        /// Map compute queue
+        GCMAPCOMPUTEQUEUE(&mut MapComputeQueueArg) = 0xc030810d,
+        /// Unmap compute queue
+        GCUNMAPCOMPUTEQUEUE(&mut UnmapComputeQueueArg) = 0xc00c810e,
+        /// Set GS ring queue sizes
+        GCSETGSRINGSIZES(&mut Unknown12) = 0xc00c8110,
+        /// Get mip stats report
+        GCMIPSTATSREPORT(&mut MipStatsReport) = 0xc0848119,
+        /// Currently unknown gc command
+        GCARESUBMITSALLOWED(&mut Unknown8) = 0xc008811b,
+        /// Ding dong for workload
+        GCDINGDONGFORWORKLOAD(&mut DingDongForWorkload) = 0xc010811c,
+        /// Get number of tca units
+        GCGETNUMTCAUNITS(&mut i32) = 0xc004811f,
+
+        /// Get genuine random
+        RNGGETGENUINE(&mut RngInput) = 0x40445301,
+        /// Fips186Prng
+        RNGFIPS(&mut RngInput) = 0x40445302,
+
+        /// Cat oob mark?
+        SIOCATMARK(&mut i32) = 0x40047307,
+        /// Set process group
+        SIOCSPGRP(&i32) = 0x80047308,
+        /// Get process group
+        SIOCGPGRP(&mut i32) = 0x40047309,
 
         /// Become controlling terminal.
         TIOCSCTTY = 0x20007461,
@@ -159,7 +213,10 @@ commands! {
 
 type Unknown2 = Unknown<2>;
 type Unknown8 = Unknown<8>;
+type Unknown12 = Unknown<12>;
 type Unknown16 = Unknown<16>;
+type Unknown36 = Unknown<36>;
+type Unknown48 = Unknown<48>;
 
 /// A dummy type to be used as a placeholder for unknown data.
 #[derive(Debug)]

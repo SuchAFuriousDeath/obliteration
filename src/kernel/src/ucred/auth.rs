@@ -1,3 +1,5 @@
+use crate::rcmgr::RcMgr;
+
 /// An implementation of `self_auth_info`.
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -8,6 +10,7 @@ pub struct AuthInfo {
     pub unk: [u8; 0x40],
 }
 
+#[allow(dead_code)]
 impl AuthInfo {
     pub const SYS_CORE: Self = Self {
         paid: AuthPaid::SYS_CORE,
@@ -25,7 +28,9 @@ impl AuthInfo {
         ]),
         unk: [0; 0x40],
     };
+}
 
+impl AuthInfo {
     pub fn from_title_id<T: AsRef<str>>(title_id: T) -> Option<Self> {
         // Skip CUSA.
         let id = title_id.as_ref().get(4..)?;
@@ -79,6 +84,16 @@ impl AuthCaps {
         Self(raw)
     }
 
+    pub fn clear_non_type(&mut self) {
+        self.0[0] &= 0x7000000000000000;
+        self.0[1] = 0;
+        self.0[2] = 0;
+        self.0[3] = 0;
+    }
+}
+
+#[allow(dead_code)]
+impl AuthCaps {
     pub fn is_nongame(&self) -> bool {
         (self.0[0] & 0x1000000000000000) != 0
     }
@@ -87,23 +102,16 @@ impl AuthCaps {
         (self.0[0] & 0x2000000000000000) != 0
     }
 
-    pub fn has_use_video_service_capability(&self) -> bool {
-        self.0[0] >> 0x39 & 1 != 0
-    }
-
     pub fn is_system(&self) -> bool {
         (self.0[0] & 0x4000000000000000) != 0
     }
 
-    pub fn is_unk1(&self) -> bool {
-        (self.0[1] & 0x4000000000000000) != 0
+    pub fn has_use_video_service(&self) -> bool {
+        (self.0[1] & 0x0200000000000000) != 0
     }
 
-    pub fn clear_non_type(&mut self) {
-        self.0[0] &= 0x7000000000000000;
-        self.0[1] = 0;
-        self.0[2] = 0;
-        self.0[3] = 0;
+    pub fn is_unk1(&self) -> bool {
+        (self.0[1] & 0x4000000000000000) != 0
     }
 }
 
@@ -117,28 +125,29 @@ impl AuthAttrs {
         Self(raw)
     }
 
-    pub fn has_sce_program_attribute(&self) -> bool {
-        (self.0[0] & 0x80000000) != 0
-    }
-
-    pub fn is_debuggable_process(&self) -> bool {
-        if self.0[0] & 0x1000000 == 0 {
-            if self.0[0] & 0x2000000 != 0 {
-                true
-            } else {
-                // TODO: properly implement this branch.
-                false
-            }
-        } else {
-            todo!()
-        }
+    pub fn is_unk2(&self) -> bool {
+        (self.0[0] & 0x00400000) != 0
     }
 
     pub fn is_unk1(&self) -> bool {
-        (self.0[0] & 0x800000) != 0
+        (self.0[0] & 0x00800000) != 0
     }
 
-    pub fn is_unk2(&self) -> bool {
-        (self.0[0] & 0x400000) != 0
+    pub fn is_debuggable_process(&self, rc: &RcMgr) -> bool {
+        if (self.0[0] & 0x01000000) == 0 {
+            if (self.0[0] & 0x02000000) != 0 || rc.is_allow_ul_debugger() {
+                return true;
+            }
+
+            // On the PS4 there is a same check as the first line of this function before it return
+            // 0, not sure what the purpose of this because the condition should always true here?
+            return false;
+        }
+
+        rc.is_softwagner_qaf_for_acmgr()
+    }
+
+    pub fn has_sce_program_attribute(&self) -> bool {
+        (self.0[0] & 0x80000000) != 0
     }
 }

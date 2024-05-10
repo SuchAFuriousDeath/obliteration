@@ -25,7 +25,7 @@ impl BudgetManager {
         let name = budget.name.clone();
         let mut budgets = self.budgets.lock().unwrap();
 
-        budgets.alloc_infallible(|_| Entry::new(Some(name), Arc::new(budget), 0x2000))
+        budgets.alloc(Entry::new(Some(name), Arc::new(budget), 0x2000))
     }
 
     fn sys_budget_get_ptype(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
@@ -34,8 +34,8 @@ impl BudgetManager {
 
         info!("Getting budget process type for process {pid}.");
 
-        if td.cred().is_system() || pid == -1 || pid == td.proc().id().get() {
-            if pid == -1 || pid == td.proc().id().get() {
+        if td.cred().is_system() || pid == -1 || pid == td.proc().id() {
+            if pid == -1 || pid == td.proc().id() {
                 // Lookup budget.
                 let id = td.proc().budget_id();
 
@@ -82,21 +82,18 @@ pub enum BudgetType {
     FdIpcSocket = 11,
 }
 
-#[allow(dead_code)]
 #[repr(C)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProcType {
-    BigApp,
-    MiniApp,
-    System, // TODO: Verify this.
+    BigApp = 0,
+    #[allow(unused)]
+    MiniApp = 1,
+    #[allow(unused)]
+    System = 2, // TODO: Verify this.
 }
 
 impl Into<u32> for ProcType {
     fn into(self) -> u32 {
-        match self {
-            ProcType::BigApp => 0,
-            ProcType::MiniApp => 1,
-            ProcType::System => 2,
-        }
+        self as u32
     }
 }

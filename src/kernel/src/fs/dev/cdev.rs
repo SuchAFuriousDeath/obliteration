@@ -1,8 +1,8 @@
 use super::dirent::Dirent;
 use crate::errno::{Errno, ENODEV, ENOTTY};
-use crate::fs::Uio;
 use crate::fs::{
-    FileBackend, IoCmd, Mode, OpenFlags, PollEvents, Stat, TruncateLength, UioMut, VFile,
+    FileBackend, IoCmd, IoLen, IoVec, IoVecMut, Mode, OpenFlags, PollEvents, Stat, TruncateLength,
+    VFile, Vnode,
 };
 use crate::process::VThread;
 use crate::time::TimeSpec;
@@ -109,61 +109,73 @@ impl CharacterDevice {
     }
 }
 
-impl FileBackend for CharacterDevice {
-    #[allow(unused_variables)] // TODO: remove when implementing
+/// Implementation of `devfs_ops_f`.
+#[derive(Debug)]
+pub(super) struct CdevFileBackend {
+    vnode: Arc<Vnode>,
+    dev: Arc<CharacterDevice>,
+}
+
+impl CdevFileBackend {
+    pub fn new(vnode: Arc<Vnode>, dev: Arc<CharacterDevice>) -> Self {
+        Self { vnode, dev }
+    }
+}
+
+impl FileBackend for CdevFileBackend {
+    fn is_seekable(&self) -> bool {
+        true
+    }
+
     fn read(
-        self: &Arc<Self>,
+        &self,
         file: &VFile,
-        buf: &mut UioMut,
+        off: u64,
+        buf: &mut [IoVecMut],
         td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+    ) -> Result<IoLen, Box<dyn Errno>> {
         todo!()
     }
 
-    #[allow(unused_variables)] // TODO: remove when implementing
     fn write(
-        self: &Arc<Self>,
+        &self,
         file: &VFile,
-        buf: &mut Uio,
+        off: u64,
+        buf: &[IoVec],
         td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+    ) -> Result<IoLen, Box<dyn Errno>> {
         todo!()
     }
 
-    #[allow(unused_variables)] // TODO: remove when implementing
-    fn ioctl(
-        self: &Arc<Self>,
-        file: &VFile,
-        cmd: IoCmd,
-        td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+    fn ioctl(&self, file: &VFile, cmd: IoCmd, td: Option<&VThread>) -> Result<(), Box<dyn Errno>> {
         match cmd {
             IoCmd::FIODTYPE(_) => todo!(),
             IoCmd::FIODGNAME(_) => todo!(),
-            _ => self.driver.ioctl(self, cmd, td)?,
+            _ => self.dev.driver.ioctl(&self.dev, cmd, td)?,
         }
 
         Ok(())
     }
 
-    #[allow(unused_variables)] // TODO: remove when implementing
-    fn poll(self: &Arc<Self>, file: &VFile, events: PollEvents, td: &VThread) -> PollEvents {
+    fn poll(&self, file: &VFile, events: PollEvents, td: &VThread) -> PollEvents {
         todo!()
     }
 
-    #[allow(unused_variables)] // TODO: remove when implementing
-    fn stat(self: &Arc<Self>, file: &VFile, td: Option<&VThread>) -> Result<Stat, Box<dyn Errno>> {
+    fn stat(&self, file: &VFile, td: Option<&VThread>) -> Result<Stat, Box<dyn Errno>> {
         todo!()
     }
 
-    #[allow(unused_variables)] // TODO: remove when implementing
     fn truncate(
-        self: &Arc<Self>,
+        &self,
         file: &VFile,
         length: TruncateLength,
         td: Option<&VThread>,
     ) -> Result<(), Box<dyn Errno>> {
         todo!()
+    }
+
+    fn vnode(&self) -> Option<&Arc<Vnode>> {
+        Some(&self.vnode)
     }
 }
 
@@ -180,8 +192,8 @@ bitflags! {
     /// Flags for [`CdevSw`].
     #[derive(Debug, Clone, Copy)]
     pub struct DriverFlags: u32 {
-        const D_NEEDMINOR = 0x00800000;
-        const D_INIT = 0x80000000;
+        const NEEDMINOR = 0x00800000;
+        const INIT = 0x80000000;
     }
 }
 
@@ -209,9 +221,10 @@ pub trait DeviceDriver: Debug + Sync + Send + 'static {
     fn read(
         &self,
         dev: &Arc<CharacterDevice>,
-        data: &mut UioMut,
+        off: Option<u64>, // TODO: Check if we actually need this for a character device.
+        buf: &mut [IoVecMut],
         td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+    ) -> Result<IoLen, Box<dyn Errno>> {
         Err(Box::new(DefaultDeviceError::ReadNotSupported))
     }
 
@@ -219,9 +232,10 @@ pub trait DeviceDriver: Debug + Sync + Send + 'static {
     fn write(
         &self,
         dev: &Arc<CharacterDevice>,
-        data: &mut Uio,
+        off: Option<u64>, // TODO: Check if we actually need this for a character device.
+        buf: &[IoVec],
         td: Option<&VThread>,
-    ) -> Result<(), Box<dyn Errno>> {
+    ) -> Result<IoLen, Box<dyn Errno>> {
         Err(Box::new(DefaultDeviceError::WriteNotSupported))
     }
 

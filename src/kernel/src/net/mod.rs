@@ -1,25 +1,21 @@
+use self::socket::{Socket, SocketCreateError, SocketFileBackend};
 use crate::budget::BudgetType;
-use crate::errno::{Errno, EFAULT, EINVAL};
-use crate::fs::{IoVec, VFileFlags, VFileType};
+use crate::errno::{Errno, EFAULT, EINVAL, ENAMETOOLONG, ENOTSOCK};
+use crate::fs::{IoVec, VFile, VFileFlags};
 use crate::info;
-use crate::{
-    process::VThread,
-    syscalls::{SysErr, SysIn, SysOut, Syscalls},
-};
+use crate::process::VThread;
+use crate::syscalls::{SysErr, SysIn, SysOut, Syscalls};
 use bitflags::bitflags;
-use core::fmt;
 use macros::Errno;
+use std::fmt::Debug;
 use std::num::NonZeroI32;
-use std::{
-    fmt::{Display, Formatter},
-    sync::Arc,
-};
+use std::sync::Arc;
 use thiserror::Error;
 
-pub use self::socket::*;
-
+mod proto;
 mod socket;
 
+/// Provides networking services (e.g. socket).
 pub struct NetManager {}
 
 impl NetManager {
@@ -29,8 +25,13 @@ impl NetManager {
         sys.register(27, &net, Self::sys_recvmsg);
         sys.register(28, &net, Self::sys_sendmsg);
         sys.register(29, &net, Self::sys_recvfrom);
+        sys.register(30, &net, Self::sys_accept);
         sys.register(97, &net, Self::sys_socket);
+        sys.register(98, &net, Self::sys_connect);
+        sys.register(99, &net, Self::sys_netcontrol);
+        sys.register(104, &net, Self::sys_bind);
         sys.register(105, &net, Self::sys_setsockopt);
+        sys.register(106, &net, Self::sys_listen);
         sys.register(113, &net, Self::sys_socketex);
         sys.register(114, &net, Self::sys_socketclose);
         sys.register(118, &net, Self::sys_getsockopt);
@@ -39,7 +40,6 @@ impl NetManager {
         net
     }
 
-    #[allow(unused_variables)] // TODO: Remove this when implementing
     fn sys_recvmsg(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         let fd: i32 = i.args[0].try_into().unwrap();
         let msg: *mut MsgHdr = i.args[1].into();
@@ -47,6 +47,10 @@ impl NetManager {
             let flags = TryInto::<u32>::try_into(i.args[2]).unwrap();
             MessageFlags::from_bits_retain(flags)
         };
+
+        let msg = unsafe { &mut *msg };
+
+        info!("Receiving a message {msg:?} from fd {fd} with flags {flags:?}.");
 
         todo!()
     }
@@ -58,6 +62,10 @@ impl NetManager {
             let flags = TryInto::<u32>::try_into(i.args[2]).unwrap();
             MessageFlags::from_bits_retain(flags)
         };
+
+        let msg = unsafe { &*msg };
+
+        info!("Sending a message {msg:?} to fd {fd} with flags {flags:?}.");
 
         let sent = self.sendit(fd, unsafe { &*msg }, flags, td)?;
 
@@ -77,6 +85,93 @@ impl NetManager {
         todo!()
     }
 
+    #[allow(unused_variables)] // TODO: Remove this when implementing
+    fn sys_accept(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
+        let fd: i32 = i.args[0].try_into().unwrap();
+        let addr: *mut u8 = i.args[1].into();
+        let addrlen: *mut u32 = i.args[2].try_into().unwrap();
+
+        todo!()
+    }
+
+    fn sys_bind(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
+        let fd: i32 = i.args[0].try_into().unwrap();
+        let ptr: *const u8 = i.args[1].into();
+        let len: i32 = i.args[2].try_into().unwrap();
+        let addr = unsafe { SockAddr::get(ptr, len) }?;
+
+        info!("Binding socket at fd {fd} to {addr:?}.");
+
+        self.bind(fd, &addr, td)?;
+
+        Ok(SysOut::ZERO)
+    }
+
+    /// See `kern_bind` on the PS4 for a reference.
+    fn bind(&self, fd: i32, addr: &SockAddr, td: &VThread) -> Result<(), SysErr> {
+        let file = td.proc().files().get(fd)?;
+        let sock = file
+            .backend::<SocketFileBackend>()
+            .ok_or(SysErr::Raw(ENOTSOCK))?
+            .as_sock();
+
+        sock.bind(addr, td)?;
+
+        Ok(())
+    }
+
+    fn sys_netcontrol(self: &Arc<Self>, _: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
+        let fd: i32 = i.args[0].try_into().unwrap();
+        let op: i32 = i.args[1].try_into().unwrap();
+        let ptr: *mut u8 = i.args[2].into();
+        let buflen: u32 = i.args[3].try_into().unwrap();
+
+        info!("Netcontrol called with op = {op}.");
+
+        let mut buf = if ptr.is_null() {
+            None
+        } else {
+            if buflen > 160 {
+                return Err(SysErr::Raw(EINVAL));
+            }
+
+            let buf = Box::new([0u8; 160]);
+
+            if op & 0x30000000 != 0 {
+                // TODO: copyin
+                todo!()
+            }
+
+            Some(buf)
+        };
+
+        let _ = if fd < 0 {
+        } else {
+            todo!()
+        };
+
+        match buf.as_mut() {
+            Some(buf) => match op {
+                // bnet_get_secure_seed
+                0x14 if buflen > 3 => crate::arnd::rand_bytes(&mut buf[..4]),
+                _ => todo!("netcontrol with op = {op}"),
+            },
+            None => todo!("netcontrol with buf = null"),
+        }
+
+        if fd > -1 {
+            todo!()
+        }
+
+        if let Some(buf) = buf {
+            if op & 0x30000000 != 0x20000000 {
+                unsafe { std::ptr::copy_nonoverlapping(buf.as_ptr(), ptr, buflen as usize) };
+            }
+        }
+
+        Ok(SysOut::ZERO)
+    }
+
     fn sys_setsockopt(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         let fd: i32 = i.args[0].try_into().unwrap();
         let level: i32 = i.args[1].try_into().unwrap();
@@ -85,6 +180,20 @@ impl NetManager {
         let len: i32 = i.args[4].try_into().unwrap();
 
         self.setsockopt(fd, level, name, value, len, td)?;
+
+        Ok(SysOut::ZERO)
+    }
+
+    fn sys_listen(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
+        let fd: i32 = i.args[0].try_into().unwrap();
+        let backlog: i32 = i.args[1].try_into().unwrap();
+        let file = td.proc().files().get(fd)?;
+        let socket = file
+            .backend::<SocketFileBackend>()
+            .ok_or(SysErr::Raw(ENOTSOCK))?
+            .as_sock();
+
+        socket.listen(backlog, Some(td))?;
 
         Ok(SysOut::ZERO)
     }
@@ -104,19 +213,36 @@ impl NetManager {
             |_| {
                 let so = Socket::new(domain, ty, proto, td.cred(), td, None)?;
 
-                let ty = if domain == 1 {
-                    VFileType::IpcSocket(so)
-                } else {
-                    VFileType::Socket(so)
-                };
-
-                Ok(ty)
+                Ok(VFile::new(
+                    VFileFlags::READ | VFileFlags::WRITE,
+                    SocketFileBackend::new(so),
+                ))
             },
-            VFileFlags::WRITE | VFileFlags::READ,
             budget,
         )?;
 
+        info!("Opened a socket at fd {fd} with domain {domain}, type {ty}, and proto {proto:?}.");
+
         Ok(fd.into())
+    }
+
+    fn sys_connect(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
+        let fd: i32 = i.args[0].try_into().unwrap();
+        let ptr: *const u8 = i.args[1].into();
+        let len: i32 = i.args[2].try_into().unwrap();
+
+        let addr = unsafe { SockAddr::get(ptr, len) }?;
+
+        info!("Connecting socket at fd {fd} to {addr:?}.");
+
+        self.connect(fd, &addr, td)?;
+
+        Ok(SysOut::ZERO)
+    }
+
+    #[allow(unused_variables)] // TODO: Remove this when implementing
+    fn connect(&self, fd: i32, addr: &SockAddr, td: &VThread) -> Result<(), SysErr> {
+        todo!("connect")
     }
 
     fn sys_getsockopt(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
@@ -147,17 +273,15 @@ impl NetManager {
             |_| {
                 let so = Socket::new(domain, ty, proto, td.cred(), td, name)?;
 
-                let ty = if domain == 1 {
-                    VFileType::IpcSocket(so)
-                } else {
-                    VFileType::Socket(so)
-                };
-
-                Ok(ty)
+                Ok(VFile::new(
+                    VFileFlags::READ | VFileFlags::WRITE,
+                    SocketFileBackend::new(so),
+                ))
             },
-            VFileFlags::WRITE | VFileFlags::READ,
             budget,
         )?;
+
+        info!("Opened a socket at fd {fd} with domain {domain}, type {ty}, proto {proto:?} and name {name:?}.");
 
         Ok(fd.into())
     }
@@ -165,13 +289,14 @@ impl NetManager {
     fn sys_socketclose(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         let fd: i32 = i.args[0].try_into().unwrap();
 
-        info!("Attempting to close socket at fd {fd}.");
+        info!("Closing socket at fd {fd}.");
 
         td.proc().files().free(fd)?;
 
         Ok(SysOut::ZERO)
     }
 
+    #[allow(unused_variables)] // TODO: Remove this when implementing
     fn sys_sendto(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         let fd: i32 = i.args[0].try_into().unwrap();
         let buf: *const u8 = i.args[1].into();
@@ -183,12 +308,10 @@ impl NetManager {
         let to: *const u8 = i.args[4].into();
         let tolen: u32 = i.args[5].try_into().unwrap();
 
-        let ref iovec = unsafe { IoVec::from_raw_parts(buf, buflen) };
-
         let msg = MsgHdr {
             name: to,
             len: tolen,
-            iovec: iovec as *const IoVec,
+            iovec: todo!(),
             iovec_len: 1,
             control: core::ptr::null(),
             control_len: 0,
@@ -260,43 +383,58 @@ impl NetManager {
 }
 
 bitflags! {
+    #[derive(Debug)]
     #[repr(C)]
     pub struct MessageFlags: u32 {}
 }
 
+#[derive(Debug)]
 #[repr(C)]
 struct MsgHdr<'a> {
     name: *const u8,
     len: u32,
-    iovec: *const IoVec<'a>,
+    iovec: *mut IoVec<'a>,
     iovec_len: u32,
     control: *const u8,
     control_len: u32,
     flags: u32,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub struct AddressFamily(i32);
+#[repr(transparent)]
+pub struct SockAddr([u8]);
 
-impl AddressFamily {
-    pub const UNSPEC: Self = Self(0);
-    pub const LOCAL: Self = Self::UNIX;
-    pub const UNIX: Self = Self(1);
-    pub const INET: Self = Self(2);
-    pub const ROUTE: Self = Self(17);
-    pub const INET6: Self = Self(28);
+impl SockAddr {
+    pub unsafe fn get(ptr: *const u8, len: i32) -> Result<Box<Self>, GetSockAddrError> {
+        if len > 255 {
+            return Err(GetSockAddrError::TooLong);
+        }
+
+        if len < 2 {
+            return Err(GetSockAddrError::TooShort);
+        }
+
+        todo!()
+    }
+
+    #[allow(unused)] // TODO: remove this when used
+    pub fn family(&self) -> u8 {
+        // SAFETY: this is ok because we know that the slice is big enough
+        unsafe { *self.0.get_unchecked(1) }
+    }
+
+    #[allow(unused)] // TODO: remove this when used
+    pub fn addr(&self) -> &[u8] {
+        // SAFETY: this is ok because we know that the slice is big enough
+        unsafe { &self.0.get_unchecked(2..) }
+    }
 }
 
-impl Display for AddressFamily {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match *self {
-            Self::UNSPEC => write!(f, "UNSPEC"),
-            Self::LOCAL => write!(f, "LOCAL"),
-            Self::INET => write!(f, "INET"),
-            Self::ROUTE => write!(f, "ROUTE"),
-            Self::INET6 => write!(f, "INET6"),
-            _ => todo!(),
-        }
+impl std::fmt::Debug for SockAddr {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SockAddr")
+            .field("family", &self.family())
+            .field("addr", &self.addr())
+            .finish()
     }
 }
 
@@ -322,3 +460,14 @@ enum GetOptError {
 
 #[derive(Debug, Error, Errno)]
 enum SendItError {}
+
+#[derive(Debug, Error, Errno)]
+pub enum GetSockAddrError {
+    #[error("length too big")]
+    #[errno(ENAMETOOLONG)]
+    TooLong,
+
+    #[error("too short")]
+    #[errno(EINVAL)]
+    TooShort,
+}

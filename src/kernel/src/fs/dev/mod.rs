@@ -30,7 +30,7 @@ pub fn make_dev(
     cred: Option<Arc<Ucred>>,
     flags: MakeDevFlags,
 ) -> Result<Arc<CharacterDevice>, MakeDevError> {
-    if driver_flags.intersects(DriverFlags::D_NEEDMINOR) {
+    if driver_flags.intersects(DriverFlags::NEEDMINOR) {
         todo!("make_dev with D_NEEDMINOR");
     }
 
@@ -44,7 +44,7 @@ pub fn make_dev(
     // Get device flags.
     let mut df = DeviceFlags::empty();
 
-    if flags.intersects(MakeDevFlags::MAKEDEV_ETERNAL) {
+    if flags.intersects(MakeDevFlags::ETERNAL) {
         df |= DeviceFlags::SI_ETERNAL;
     }
 
@@ -293,7 +293,7 @@ bitflags! {
     /// Flags for [`make_dev()`].
     #[derive(Clone, Copy)]
     pub struct MakeDevFlags: u32 {
-        const MAKEDEV_ETERNAL = 0x10;
+        const ETERNAL = 0x10;
     }
 }
 
@@ -313,7 +313,7 @@ impl Devices {
 /// Represents an error when [`make_dev()`] is failed.
 #[derive(Debug, Error, Errno)]
 pub enum MakeDevError {
-    #[error("the device with the same name already exist")]
+    #[error("the device with the same name already exists")]
     #[errno(EEXIST)]
     AlreadyExist(String),
 }

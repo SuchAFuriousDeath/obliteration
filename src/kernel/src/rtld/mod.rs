@@ -4,6 +4,7 @@ use self::resolver::{ResolveFlags, SymbolResolver};
 use crate::budget::ProcType;
 use crate::ee::native::{NativeEngine, SetupModuleError};
 use crate::errno::{Errno, EINVAL, ENOENT, ENOEXEC, ENOMEM, EPERM, ESRCH};
+use crate::fs::VFileFlags;
 use crate::fs::{Fs, OpenError, VPath, VPathBuf};
 use crate::idt::Entry;
 use crate::imgact::orbis::{DynamicFlags, Elf, FileType, ReadProgramError, Relocation, Symbol};
@@ -91,7 +92,7 @@ impl RuntimeLinker {
         let path = path.as_ref();
         let file = self
             .fs
-            .open(path, Some(td))
+            .open(path, VFileFlags::READ, Some(td))
             .map_err(ExecError::OpenExeFailed)?;
         let elf = Elf::open(path.as_str(), file).map_err(ExecError::ReadExeFailed)?;
 
@@ -209,7 +210,7 @@ impl RuntimeLinker {
         }
 
         // Get file.
-        let file = match self.fs.open(path, Some(td)) {
+        let file = match self.fs.open(path, VFileFlags::READ, Some(td)) {
             Ok(v) => v,
             Err(e) => return Err(LoadError::OpenFileFailed(e)),
         };
@@ -255,7 +256,7 @@ impl RuntimeLinker {
 
         // Map file.
         let mut table = td.proc().objects_mut();
-        let (entry, _) = table.alloc(|id| {
+        let (entry, _) = table.try_alloc_with(|id| {
             let name = path.file_name().unwrap();
             let id: u32 = (id + 1).try_into().unwrap();
             let mut md = match Module::map(&self.ee, td.proc(), elf, 0, name, id, names, tls) {
@@ -1253,8 +1254,8 @@ pub enum MapError {
     #[error("cannot allocate {0} bytes")]
     MemoryAllocationFailed(usize, #[source] MmapError),
 
-    #[error("cannot protect {1:#018x} bytes starting at {0:p} with {2}")]
-    ProtectMemoryFailed(*const u8, usize, Protections, #[source] MemoryUpdateError),
+    #[error("cannot protect {1:#018x} bytes starting at {0:#x} with {2}")]
+    ProtectMemoryFailed(usize, usize, Protections, #[source] MemoryUpdateError),
 
     #[error("cannot unprotect segment {0}")]
     UnprotectSegmentFailed(usize, #[source] UnprotectSegmentError),

@@ -1,8 +1,9 @@
 use crate::arch::MachDep;
 use crate::budget::{Budget, BudgetManager, ProcType};
 use crate::dev::{
-    DebugManager, DebugManagerInitError, DipswInitError, DipswManager, DmemContainer, TtyManager,
-    TtyManagerInitError,
+    CameraInitError, CameraManager, DceManager, DebugManager, DebugManagerInitError,
+    DipswInitError, DipswManager, DmemContainer, GcInitError, GcManager, HmdManager, RngInitError,
+    RngManager, SblSrvManager, TtyManager, TtyManagerInitError,
 };
 use crate::dmem::{DmemManager, DmemManagerInitError};
 use crate::ee::native::NativeEngine;
@@ -10,21 +11,25 @@ use crate::ee::EntryArg;
 use crate::errno::EEXIST;
 use crate::fs::{Fs, FsInitError, MkdirError, MountError, MountFlags, MountOpts, VPath, VPathBuf};
 use crate::hv::Hypervisor;
+use crate::idps::ConsoleId;
 use crate::kqueue::KernelQueueManager;
 use crate::log::{print, LOGGER};
 use crate::namedobj::NamedObjManager;
 use crate::net::NetManager;
 use crate::osem::OsemManager;
 use crate::process::{ProcManager, VThread};
+use crate::rcmgr::RcMgr;
 use crate::regmgr::RegMgr;
 use crate::rtld::{ExecError, LoadFlags, ModuleFlags, RuntimeLinker};
 use crate::shm::SharedMemoryManager;
+use crate::signal::SignalManager;
 use crate::syscalls::Syscalls;
 use crate::sysctl::Sysctl;
 use crate::time::TimeManager;
 use crate::ucred::{AuthAttrs, AuthCaps, AuthInfo, AuthPaid, Gid, Ucred, Uid};
 use crate::umtx::UmtxManager;
 use clap::Parser;
+use dev::{DceInitError, HmdInitError, SblSrvInitError};
 use llt::{OsThread, SpawnError};
 use macros::vpath;
 use param::Param;
@@ -32,8 +37,8 @@ use serde::Deserialize;
 use std::error::Error;
 use std::fs::{create_dir_all, remove_dir_all, File};
 use std::io::Write;
-use std::path::PathBuf;
-use std::process::{ExitCode, Termination};
+use std::path::{Path, PathBuf};
+use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::SystemTime;
 use sysinfo::{MemoryRefreshKind, System};
@@ -48,6 +53,7 @@ mod ee;
 mod errno;
 mod fs;
 mod hv;
+mod idps;
 mod idt;
 mod imgact;
 mod kqueue;
@@ -56,6 +62,7 @@ mod namedobj;
 mod net;
 mod osem;
 mod process;
+mod rcmgr;
 mod regmgr;
 mod rtld;
 mod shm;
@@ -68,23 +75,42 @@ mod ucred;
 mod umtx;
 mod vm;
 
-fn main() -> Exit {
-    run().into()
-}
-
-fn run() -> Result<(), KernelError> {
-    // Begin logger.
-    log::init();
-
+fn main() -> ExitCode {
     // Load arguments.
-    let args = if std::env::args().any(|a| a == "--debug") {
-        let file = File::open(".kernel-debug").map_err(KernelError::FailedToOpenDebugConfig)?;
+    let args = if std::env::args_os().any(|a| a == "--debug") {
+        let path = Path::new(".kernel-debug");
+        let file = match File::open(path) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to open {}: {}.", path.display(), e);
+                return ExitCode::FAILURE;
+            }
+        };
 
-        serde_yaml::from_reader(file).map_err(KernelError::FailedToParseDebugConfig)?
+        match serde_yaml::from_reader(file) {
+            Ok(v) => v,
+            Err(e) => {
+                eprintln!("Failed to parse {}: {}.", path.display(), e);
+                return ExitCode::FAILURE;
+            }
+        }
     } else {
-        Args::try_parse().map_err(KernelError::FailedToParseArgs)?
+        Args::parse()
     };
 
+    // Run the kernel.
+    log::init();
+
+    match run(args) {
+        Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            error!(e, "Error while running kernel");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn run(args: Args) -> Result<(), KernelError> {
     // Initialize debug dump.
     if let Some(path) = &args.debug_dump {
         // Remove previous dump.
@@ -192,8 +218,9 @@ fn run() -> Result<(), KernelError> {
     // Initialize foundations.
     #[allow(unused_variables)] // TODO: Remove this when someone uses hv.
     let hv = Hypervisor::new()?;
-    let mut syscalls = Syscalls::new();
-    let fs = Fs::new(args.system, &cred, &mut syscalls)?;
+    let mut sys = Syscalls::new();
+    let fs = Fs::new(args.system, &cred, &mut sys).map_err(KernelError::FilesystemInitFailed)?;
+    let rc = RcMgr::new();
 
     // TODO: Check permission of /mnt on the PS4.
     let path = vpath!("/mnt");
@@ -344,31 +371,44 @@ fn run() -> Result<(), KernelError> {
 
     // Initialize TTY system.
     #[allow(unused_variables)] // TODO: Remove this when someone uses tty.
-    let tty = TtyManager::new()?;
+    let tty = TtyManager::new().map_err(KernelError::TtyInitFailed)?;
     #[allow(unused_variables)] // TODO: Remove this when someone uses dipsw.
-    let dipsw = DipswManager::new()?;
+    let dipsw = DipswManager::new().map_err(KernelError::DipswInitFailed)?;
+    #[allow(unused_variables)] // TODO: Remove this when someone uses gc.
+    let gc = GcManager::new().map_err(KernelError::GcManagerInitFailed)?;
+    #[allow(unused_variables)] // TODO: Remove this when someone uses camera.
+    let camera = CameraManager::new().map_err(KernelError::CameraManagerInitFailed)?;
+    #[allow(unused_variables)] // TODO: Remove this when someone uses rng.
+    let rng = RngManager::new().map_err(KernelError::RngManagerInitFailed)?;
+    #[allow(unused_variables)] // TODO: Remove this when someone uses sbl_srv.
+    let sbl_srv = SblSrvManager::new().map_err(KernelError::SblSrvManagerInitFailed)?;
+    #[allow(unused_variables)] // TODO: Remove this when someone uses hmd.
+    let hmd_cmd = HmdManager::new().map_err(KernelError::HmdManagerInitFailed)?;
+    #[allow(unused_variables)] // TODO: Remove this when someone uses dce.
+    let dce = DceManager::new().map_err(KernelError::DceManagerInitFailed)?;
 
     // Initialize kernel components.
     #[allow(unused_variables)] // TODO: Remove this when someone uses debug.
-    let debug = DebugManager::new()?;
-    RegMgr::new(&mut syscalls);
-    let machdep = MachDep::new(&mut syscalls);
-    let budget = BudgetManager::new(&mut syscalls);
+    let debug = DebugManager::new().map_err(KernelError::DebugManagerInitFailed)?;
+    RegMgr::new(&mut sys);
+    let machdep = MachDep::new(&mut sys);
+    let budget = BudgetManager::new(&mut sys);
 
-    DmemManager::new(&fs, &mut syscalls)?;
-    SharedMemoryManager::new(&mut syscalls);
-    Sysctl::new(&machdep, &mut syscalls);
-    TimeManager::new(&mut syscalls);
-    KernelQueueManager::new(&mut syscalls);
-    NetManager::new(&mut syscalls);
-    NamedObjManager::new(&mut syscalls);
-    OsemManager::new(&mut syscalls);
-    UmtxManager::new(&mut syscalls);
-    let pmgr = ProcManager::new(&mut syscalls);
+    SignalManager::new(&mut sys);
+    DmemManager::new(&fs, &mut sys).map_err(KernelError::DmemManagerInitFailed)?;
+    SharedMemoryManager::new(&mut sys);
+    Sysctl::new(&machdep, &mut sys);
+    TimeManager::new(&mut sys);
+    KernelQueueManager::new(&mut sys);
+    NetManager::new(&mut sys);
+    NamedObjManager::new(&mut sys);
+    OsemManager::new(&mut sys);
+    UmtxManager::new(&mut sys);
+    let pmgr = ProcManager::new(&fs, &rc, &mut sys);
 
     // Initialize runtime linker.
     let ee = NativeEngine::new();
-    let ld = RuntimeLinker::new(&fs, &ee, &mut syscalls);
+    let ld = RuntimeLinker::new(&fs, &ee, &mut sys);
 
     // TODO: Get correct budget name from the PS4.
     let budget_id = budget.create(Budget::new("big app", ProcType::BigApp));
@@ -381,7 +421,7 @@ fn run() -> Result<(), KernelError> {
             DmemContainer::One, // See sys_budget_set on the PS4.
             proc_root,
             system_component,
-            syscalls,
+            sys,
         )
         .map_err(KernelError::CreateProcessFailed)?;
 
@@ -542,6 +582,7 @@ fn join_thread(thr: OsThread) -> Result<(), std::io::Error> {
 }
 
 #[derive(Parser, Deserialize)]
+#[command(about)]
 #[serde(rename_all = "kebab-case")]
 struct Args {
     #[arg(long)]
@@ -560,6 +601,10 @@ struct Args {
     #[arg(long)]
     #[serde(default)]
     pro: bool,
+
+    #[arg(long)]
+    #[serde(default)]
+    idps: ConsoleId,
 }
 
 #[derive(Debug, Error)]
@@ -573,15 +618,6 @@ enum DiscordPresenceError {
 
 #[derive(Debug, Error)]
 enum KernelError {
-    #[error("couldn't open .kernel-debug")]
-    FailedToOpenDebugConfig(#[source] std::io::Error),
-
-    #[error("couldn't parse .kernel-debug")]
-    FailedToParseDebugConfig(#[source] serde_yaml::Error),
-
-    #[error("couldn't parse arguments")]
-    FailedToParseArgs(#[source] clap::Error),
-
     #[error("couldn't open param.sfo")]
     FailedToOpenGameParam(#[source] std::io::Error),
 
@@ -592,7 +628,7 @@ enum KernelError {
     InvalidTitleId(PathBuf),
 
     #[error("filesystem initialization failed")]
-    FilesystemInitFailed(#[from] FsInitError),
+    FilesystemInitFailed(#[source] FsInitError),
 
     #[error("couldn't create {0}")]
     CreateDirectoryFailed(VPathBuf, #[source] MkdirError),
@@ -601,16 +637,34 @@ enum KernelError {
     MountFailed(VPathBuf, #[source] MountError),
 
     #[error("tty initialization failed")]
-    TtyInitFailed(#[from] TtyManagerInitError),
+    TtyInitFailed(#[source] TtyManagerInitError),
 
     #[error("dipsw initialization failed")]
-    DipswInitFailed(#[from] DipswInitError),
+    DipswInitFailed(#[source] DipswInitError),
 
     #[error("debug manager initialization failed")]
-    DebugManagerInitFailed(#[from] DebugManagerInitError),
+    DebugManagerInitFailed(#[source] DebugManagerInitError),
+
+    #[error("gc manager initialization failed")]
+    GcManagerInitFailed(#[source] GcInitError),
+
+    #[error("camera manager initialization failed")]
+    CameraManagerInitFailed(#[source] CameraInitError),
+
+    #[error("rng manager initialization failed")]
+    RngManagerInitFailed(#[source] RngInitError),
 
     #[error("dmem manager initialization failed")]
-    DmemManagerInitFailes(#[from] DmemManagerInitError),
+    DmemManagerInitFailed(#[source] DmemManagerInitError),
+
+    #[error("sbl_srv manager initialization failed")]
+    SblSrvManagerInitFailed(#[source] SblSrvInitError),
+
+    #[error("hmd manager initialization failed")]
+    HmdManagerInitFailed(#[source] HmdInitError),
+
+    #[error("dce manager initialization failed")]
+    DceManagerInitFailed(#[source] DceInitError),
 
     #[error("couldn't create application process")]
     CreateProcessFailed(#[source] self::process::SpawnError),
@@ -632,33 +686,4 @@ enum KernelError {
 
     #[error("failed to join with main thread")]
     FailedToJoinMainThread(#[source] std::io::Error),
-}
-
-/// We have to use this for a custom implementation of the [`Termination`] trait, because
-/// we need to log the error using our own error! macro instead of [`std::fmt::Debug::fmt`],
-/// which is what the default implementation of Termination uses for [`Result<T: Termination, E: Debug>`].
-enum Exit {
-    Ok,
-    Err(KernelError),
-}
-
-impl Termination for Exit {
-    fn report(self) -> ExitCode {
-        match self {
-            Exit::Ok => ExitCode::SUCCESS,
-            Exit::Err(e) => {
-                error!(e, "Error while running kernel");
-                ExitCode::FAILURE
-            }
-        }
-    }
-}
-
-impl From<Result<(), KernelError>> for Exit {
-    fn from(r: Result<(), KernelError>) -> Self {
-        match r {
-            Ok(_) => Exit::Ok,
-            Err(e) => Exit::Err(e),
-        }
-    }
 }

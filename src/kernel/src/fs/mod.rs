@@ -152,10 +152,10 @@ impl Fs {
         sys.register(188, &fs, Self::sys_stat);
         sys.register(189, &fs, Self::sys_fstat);
         sys.register(190, &fs, Self::sys_lstat);
-        sys.register(191, &fs, Self::sys_pread);
         sys.register(209, &fs, Self::sys_poll);
         sys.register(289, &fs, Self::sys_preadv);
         sys.register(290, &fs, Self::sys_pwritev);
+        sys.register(475, &fs, Self::sys_pread);
         sys.register(476, &fs, Self::sys_pwrite);
         sys.register(478, &fs, Self::sys_lseek);
         sys.register(479, &fs, Self::sys_truncate);
@@ -170,18 +170,18 @@ impl Fs {
         self.root.read().clone()
     }
 
-    pub fn open(&self, path: impl AsRef<VPath>, td: Option<&VThread>) -> Result<VFile, OpenError> {
+    pub fn open(
+        &self,
+        path: impl AsRef<VPath>,
+        flags: VFileFlags,
+        td: Option<&VThread>,
+    ) -> Result<VFile, OpenError> {
         let vnode = self
             .lookup(path, true, td)
             .map_err(OpenError::LookupFailed)?;
+        let backend = vnode.to_file_backend();
 
-        let ty = if let Some(VnodeItem::Device(dev)) = vnode.item().as_ref() {
-            VFileType::Device(dev.clone())
-        } else {
-            VFileType::Vnode(vnode.clone())
-        };
-
-        Ok(VFile::new(ty))
+        Ok(VFile::new(flags, backend))
     }
 
     pub fn lookup(
@@ -368,28 +368,27 @@ impl Fs {
     fn sys_read(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         let fd: i32 = i.args[0].try_into().unwrap();
         let ptr: *mut u8 = i.args[1].into();
-        let len: usize = i.args[2].try_into().unwrap();
+        let len: IoLen = i.args[2].try_into()?;
 
-        let iovec = unsafe { IoVec::try_from_raw_parts(ptr, len) }?;
+        info!("Reading {len} bytes from fd {fd}.");
 
-        todo!()
+        todo!("sys_read")
     }
 
     fn sys_write(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         let fd: i32 = i.args[0].try_into().unwrap();
         let ptr: *const u8 = i.args[1].into();
-        let len: usize = i.args[2].into();
+        let len: IoLen = i.args[2].try_into()?;
 
-        let iovec = unsafe { IoVec::try_from_raw_parts(ptr, len) }?;
+        info!("Writing {len} bytes to fd {fd}.");
 
-        todo!()
+        todo!("sys_write")
     }
 
     fn sys_open(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         // Get arguments.
         let path = unsafe { i.args[0].to_path()?.unwrap() };
         let flags: OpenFlags = i.args[1].try_into().unwrap();
-        let mode: u32 = i.args[2].try_into().unwrap();
 
         // Check flags.
         if flags.intersects(OpenFlags::O_EXEC) {
@@ -409,16 +408,17 @@ impl Fs {
             todo!("open({path}) with flags & O_EXLOCK");
         } else if flags.intersects(OpenFlags::O_TRUNC) {
             todo!("open({path}) with flags & O_TRUNC");
-        } else if mode != 0 {
-            todo!("open({path}, {flags}) with mode = {mode}");
+        } else {
+            let mode: u32 = i.args[2].try_into().unwrap();
+            if mode != 0 {
+                todo!("open({path}, {flags}) with mode = {mode}");
+            }
         }
 
         info!("Opening {path} with flags = {flags}.");
 
         // Lookup file.
-        let mut file = self.open(path, Some(td))?;
-
-        *file.flags_mut() = flags.into_fflags();
+        let file = self.open(path, flags.into_fflags(), Some(td))?;
 
         // Install to descriptor table.
         let fd = td.proc().files().alloc(Arc::new(file));
@@ -431,7 +431,7 @@ impl Fs {
     fn sys_close(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         let fd: i32 = i.args[0].try_into().unwrap();
 
-        info!("Attempting to close fd {fd}.");
+        info!("Closing fd {fd}.");
 
         td.proc().files().free(fd)?;
 
@@ -519,12 +519,8 @@ impl Fs {
         todo!()
     }
 
-    fn readv(&self, fd: i32, uio: UioMut, td: &VThread) -> Result<usize, SysErr> {
-        let file = td.proc().files().get_for_read(fd)?;
-
-        let read = file.do_read(uio, Some(td))?;
-
-        Ok(read)
+    fn readv(&self, fd: i32, iov: &mut [IoVecMut], td: &VThread) -> Result<IoLen, SysErr> {
+        todo!()
     }
 
     fn sys_writev(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
@@ -535,12 +531,10 @@ impl Fs {
         todo!()
     }
 
-    fn writev(&self, fd: i32, uio: Uio, td: &VThread) -> Result<usize, SysErr> {
+    fn writev(&self, fd: i32, td: &VThread) -> Result<usize, SysErr> {
         let file = td.proc().files().get_for_write(fd)?;
 
-        let written = file.do_write(uio, Some(td))?;
-
-        Ok(written)
+        todo!()
     }
 
     fn sys_stat(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
@@ -606,93 +600,133 @@ impl Fs {
     fn sys_pread(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         let fd: i32 = i.args[0].try_into().unwrap();
         let ptr: *mut u8 = i.args[1].into();
-        let len: usize = i.args[2].try_into().unwrap();
+        let len: IoLen = i.args[2].try_into()?;
         let offset: i64 = i.args[3].into();
+        let mut buf = unsafe { IoVecMut::new(ptr, len) };
 
-        let iovec = unsafe { IoVec::try_from_raw_parts(ptr, len) }?;
+        info!("Reading {len} bytes from fd {fd} at offset {offset}.");
 
-        let uio = UioMut {
-            vecs: &mut [iovec],
-            bytes_left: len,
-            offset,
-        };
-
-        let read = self.preadv(fd, uio, td)?;
+        let read = self.preadv(fd, offset, std::slice::from_mut(&mut buf), td)?;
 
         Ok(read.into())
     }
 
     fn sys_pwrite(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
         let fd: i32 = i.args[0].try_into().unwrap();
-        let ptr: *mut u8 = i.args[1].into();
-        let len: usize = i.args[2].try_into().unwrap();
+        let ptr: *const u8 = i.args[1].into();
+        let len: IoLen = i.args[2].try_into()?;
         let offset: i64 = i.args[3].into();
+        let buf = unsafe { IoVec::new(ptr, len) };
 
-        let iovec = unsafe { IoVec::try_from_raw_parts(ptr, len) }?;
+        info!("Writing {len} bytes to fd {fd} at offset {offset}.");
 
-        let uio = Uio {
-            vecs: &[iovec],
-            bytes_left: len,
-            offset,
-        };
-
-        let written = self.pwritev(fd, uio, td)?;
+        let written = self.pwritev(fd, offset, std::slice::from_ref(&buf), td)?;
 
         Ok(written.into())
     }
 
     fn sys_preadv(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
+        // Get arguments.
         let fd: i32 = i.args[0].try_into().unwrap();
-        let iovec: *mut IoVec = i.args[1].into();
+        let iovec: *mut IoVecMut = i.args[1].into();
         let count: u32 = i.args[2].try_into().unwrap();
         let offset: i64 = i.args[3].into();
+        let buf = if count >= 1025 {
+            return Err(SysErr::Raw(EINVAL));
+        } else {
+            unsafe { std::slice::from_raw_parts_mut(iovec, count.try_into().unwrap()) }
+        };
 
-        let uio = unsafe { UioMut::copyin(iovec, count, offset) }?;
+        // Check if total length exceed the limit.
+        let mut total = IoLen::ZERO;
 
-        let read = self.preadv(fd, uio, td)?;
+        for v in buf.iter() {
+            match total.checked_add(v.len()) {
+                Some(v) => total = v,
+                None => return Err(SysErr::Raw(EINVAL)),
+            }
+        }
+
+        // Read the file.
+        let read = self.preadv(fd, offset, buf, td)?;
 
         Ok(read.into())
     }
 
-    fn preadv(&self, fd: i32, uio: UioMut, td: &VThread) -> Result<usize, SysErr> {
+    /// See `kern_preadv` on the PS4 for a reference.
+    fn preadv(
+        &self,
+        fd: i32,
+        off: i64,
+        buf: &mut [IoVecMut],
+        td: &VThread,
+    ) -> Result<IoLen, SysErr> {
+        // Check if file seekable.
         let file = td.proc().files().get_for_read(fd)?;
 
-        let vnode = file.seekable_vnode().ok_or(SysErr::Raw(ESPIPE))?;
-
-        if uio.offset < 0 && !vnode.is_character() {
-            return Err(SysErr::Raw(EINVAL));
+        if !file.is_seekable() {
+            return Err(SysErr::Raw(ESPIPE));
         }
 
-        let read = file.do_read(uio, Some(td))?;
+        // Check offset.
+        let off = if off > -1 {
+            Some(TryInto::<u64>::try_into(off).unwrap())
+        } else if !file.vnode().unwrap().is_character() {
+            return Err(SysErr::Raw(EINVAL));
+        } else {
+            None
+        };
 
-        Ok(read)
+        todo!()
     }
 
     fn sys_pwritev(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
+        // Get arguments.
         let fd: i32 = i.args[0].try_into().unwrap();
         let iovec: *const IoVec = i.args[1].into();
         let count: u32 = i.args[2].try_into().unwrap();
         let offset: i64 = i.args[3].into();
+        let buf = if count >= 1025 {
+            return Err(SysErr::Raw(EINVAL));
+        } else {
+            unsafe { std::slice::from_raw_parts(iovec, count.try_into().unwrap()) }
+        };
 
-        let uio = unsafe { Uio::copyin(iovec, count, offset) }?;
+        // Check if total length exceed the limit.
+        let mut total = IoLen::ZERO;
 
-        let written = self.pwritev(fd, uio, td)?;
+        for v in buf {
+            match total.checked_add(v.len()) {
+                Some(v) => total = v,
+                None => return Err(SysErr::Raw(EINVAL)),
+            }
+        }
+
+        // Write the file.
+        let written = self.pwritev(fd, offset, buf, td)?;
 
         Ok(written.into())
     }
 
-    fn pwritev(&self, fd: i32, uio: Uio, td: &VThread) -> Result<usize, SysErr> {
+    /// See `kern_pwritev` on the PS4 for a reference.
+    fn pwritev(&self, fd: i32, off: i64, buf: &[IoVec], td: &VThread) -> Result<IoLen, SysErr> {
+        // Check if file seekable.
         let file = td.proc().files().get_for_write(fd)?;
 
-        let vnode = file.seekable_vnode().ok_or(SysErr::Raw(ESPIPE))?;
-
-        if uio.offset < 0 && !vnode.is_character() {
-            return Err(SysErr::Raw(EINVAL));
+        if !file.is_seekable() {
+            return Err(SysErr::Raw(ESPIPE));
         }
 
-        let written = file.do_write(uio, Some(td))?;
+        // Check offset.
+        let off = if off > -1 {
+            Some(TryInto::<u64>::try_into(off).unwrap())
+        } else if !file.vnode().unwrap().is_character() {
+            return Err(SysErr::Raw(EINVAL));
+        } else {
+            None
+        };
 
-        Ok(written)
+        todo!()
     }
 
     fn sys_fstatat(self: &Arc<Self>, td: &VThread, i: &SysIn) -> Result<SysOut, SysErr> {
@@ -738,6 +772,10 @@ impl Fs {
         let nfds: u32 = i.args[1].try_into().unwrap();
         let timeout: i32 = i.args[2].try_into().unwrap();
 
+        let fds = unsafe { std::slice::from_raw_parts_mut(fds, nfds.try_into().unwrap()) };
+
+        info!("Polling {nfds} file descriptors: {fds:?}.");
+
         todo!()
     }
 
@@ -750,9 +788,13 @@ impl Fs {
             whence.try_into()?
         };
 
+        info!("Seeking fd {fd} with whence = {whence:?} and offset = {offset}.");
+
         let file = td.proc().files().get(fd)?;
 
-        let vnode = file.seekable_vnode().ok_or(SysErr::Raw(ESPIPE))?;
+        if !file.is_seekable() {
+            return Err(SysErr::Raw(ESPIPE));
+        }
 
         // check vnode type
 
@@ -967,6 +1009,7 @@ enum At {
     Fd(i32),
 }
 
+#[derive(Debug)]
 pub enum Whence {
     Set = 0,     // SEEK_SET
     Current = 1, // SEEK_CUR
@@ -1026,6 +1069,7 @@ impl TryFrom<i64> for TruncateLength {
 pub struct TruncateLengthError(());
 
 #[repr(C)]
+#[derive(Debug)]
 pub struct PollFd {
     fd: i32,
     events: PollEvents,

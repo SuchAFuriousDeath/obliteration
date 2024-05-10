@@ -31,13 +31,13 @@ impl DeviceDriver for Dipsw {
         let td = td.unwrap();
 
         if !td.cred().is_system() {
-            todo!()
-        } else {
             match cmd {
                 // TODO: properly implement this
-                IoCmd::DIPSWCHECK2(val) => *val = false as i32,
+                IoCmd::DIPSWCHECK2(val) | IoCmd::DIPSWUNK(val) => *val = false as i32,
                 _ => todo!(),
             }
+        } else {
+            todo!()
         }
 
         Ok(())
@@ -59,16 +59,16 @@ impl DipswManager {
             Gid::ROOT,
             Mode::new(0o644).unwrap(),
             None,
-            MakeDevFlags::MAKEDEV_ETERNAL,
+            MakeDevFlags::ETERNAL,
         )?;
 
         Ok(Arc::new(Self { dipsw }))
     }
 }
 
-/// Represents an error when [`TtyManager`] fails to initialize.
+/// Represents an error when [`DipswManager`] fails to initialize.
 #[derive(Debug, Error)]
 pub enum DipswInitError {
     #[error("cannot create dipsw device")]
-    CreateConsoleFailed(#[from] MakeDevError),
+    CreateDipswFailed(#[from] MakeDevError),
 }

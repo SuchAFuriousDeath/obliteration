@@ -5,7 +5,7 @@ use std::io::Error;
 ///
 /// This struct will allocate a 8GB of memory immediately but not commit any parts of it until there
 /// is an allocation request. That mean the actual memory usage is not fixed at 8GB but will be
-/// depend on what PS4 applications currently running. If it is a simple game the memory usage might
+/// dependent on what PS4 applications currently running. If it is a simple game the memory usage might be
 /// just a hundred of megabytes.
 pub struct Ram {
     addr: usize,
@@ -16,7 +16,6 @@ impl Ram {
     pub const SIZE: usize = 1024 * 1024 * 1024 * 8; // 8GB
 
     pub fn new(addr: usize) -> Result<Self, Error> {
-        // Reserve a memory range on *nix.
         #[cfg(unix)]
         let mem = {
             use libc::{mmap, MAP_ANON, MAP_FAILED, MAP_PRIVATE, PROT_NONE};
@@ -40,7 +39,6 @@ impl Ram {
             mem.cast()
         };
 
-        // Reserve a memory range on Windows.
         #[cfg(windows)]
         let mem = {
             use std::ptr::null;

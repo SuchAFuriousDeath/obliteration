@@ -2,6 +2,7 @@ pub use self::auth::*;
 pub use self::id::*;
 pub use self::privilege::*;
 use crate::errno::{Errno, EPERM};
+use crate::rcmgr::RcMgr;
 use macros::Errno;
 use thiserror::Error;
 
@@ -116,7 +117,7 @@ impl Ucred {
 
     /// See `sceSblACMgrHasUseVideoServiceCapability` on the PS4 for a reference.
     pub fn has_use_video_service_capability(&self) -> bool {
-        self.auth.caps.has_use_video_service_capability()
+        self.auth.caps.has_use_video_service()
     }
 
     /// See `sceSblACMgrIsWebcoreProcess` on the PS4 for a reference.
@@ -132,8 +133,8 @@ impl Ucred {
     }
 
     /// See `sceSblACMgrIsDebuggableProcess` on the PS4 for a reference.
-    pub fn is_debuggable_process(&self) -> bool {
-        self.auth.attrs.is_debuggable_process()
+    pub fn is_debuggable_process(&self, rc: &RcMgr) -> bool {
+        self.auth.attrs.is_debuggable_process(rc)
     }
 
     /// See `sceSblACMgrIsNongameUcred` on the PS4 for a reference.
@@ -151,6 +152,13 @@ impl Ucred {
 
     pub fn is_unk2(&self) -> bool {
         self.auth.caps.is_unk1() && self.auth.attrs.is_unk2()
+    }
+
+    pub fn unk_gc_check(&self) -> bool {
+        matches!(
+            self.auth.paid.get(),
+            0x3800000000000009 | 0x380100000000002c
+        )
     }
 
     /// See `priv_check_cred` on the PS4 for a reference.
