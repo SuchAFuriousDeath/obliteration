@@ -147,7 +147,9 @@ fn run_vmm(args: &Args) -> Result<(), ApplicationError> {
 
         todo!()
     } else {
-        match run_launcher(&graphics, profiles)? {
+        let args = run_launcher(&graphics, profiles)?.then_some(VmmArgs {});
+
+        match args {
             Some(v) => v,
             None => return Ok(()),
         }
@@ -200,7 +202,7 @@ fn run_panic_handler() -> Result<(), ApplicationError> {
 fn run_launcher(
     graphics: &impl Graphics,
     profiles: Vec<Profile>,
-) -> Result<Option<VmmArgs>, ApplicationError> {
+) -> Result<bool, ApplicationError> {
     // Create window and register callback handlers.
     let win = MainWindow::new().map_err(ApplicationError::CreateMainWindow)?;
     let profiles = Rc::new(ProfileModel::new(profiles));
@@ -234,10 +236,7 @@ fn run_launcher(
     drop(win);
 
     // Extract GUI states.
-    let start = Rc::into_inner(start)
-        .unwrap()
-        .into_inner()
-        .then_some(VmmArgs {});
+    let start = Rc::into_inner(start).unwrap().into_inner();
 
     Ok(start)
 }
